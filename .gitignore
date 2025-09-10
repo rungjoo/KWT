@@ -1,0 +1,19 @@
+# Model directories
+model/
+
+# Log files
+*.log
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Large dataset files
+dataset/squad/
+dataset/trivia_qa/
+dataset/merged*.jsonl
