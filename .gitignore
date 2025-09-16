@@ -1,5 +1,7 @@
 # Model directories
 model/
+halu_model/checkpoints/
+halu_model/wandb/
 
 # Log files
 *.log
