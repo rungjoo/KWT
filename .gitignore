@@ -19,3 +19,14 @@ __pycache__/
 dataset/squad/
 dataset/trivia_qa/
 dataset/merged*.jsonl
+dataset/ref_sft/
+dataset/new_sft/halueval/
+dataset/new_sft/medqa/
+dataset/sciq/
+*.arrow
+*.jsonl
+
+# Model checkpoints
+halu_model/halueval/
+halu_model/medqa/
+ref_model/

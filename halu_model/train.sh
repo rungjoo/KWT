@@ -1,0 +1,2 @@
+python3 train_sft_dpo.py --dataname halueval --epochs 3 --save_steps 250 --dpo_weight 0.5 --sft_idk_weight 0.1 --save_run_name sft3
+python3 train_sft_dpo.py --dataname medqa --epochs 3 --save_steps 250 --dpo_weight 0.5 --sft_idk_weight 0.1 --save_run_name sft3

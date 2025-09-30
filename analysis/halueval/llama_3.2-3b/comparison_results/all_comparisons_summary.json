@@ -1,0 +1,104 @@
+{
+  "base_model": "base_model",
+  "comparisons": [
+    {
+      "name": "base_model_vs_sft",
+      "statistics": {
+        "both_correct": 407,
+        "both_incorrect": 1123,
+        "base_correct_other_incorrect": 262,
+        "base_incorrect_other_correct": 208,
+        "total_compared": 2000,
+        "missing_in_comparison": 0,
+        "both_correct_pct": 20.35,
+        "both_incorrect_pct": 56.15,
+        "base_correct_other_incorrect_pct": 13.1,
+        "base_incorrect_other_correct_pct": 10.4
+      },
+      "idk_detailed_statistics": {
+        "base_O_comp_O_no_idk": 407,
+        "base_O_comp_O_with_idk": 0,
+        "base_O_comp_X_no_idk": 262,
+        "base_O_comp_X_with_idk": 0,
+        "base_X_comp_O_no_idk": 208,
+        "base_X_comp_O_with_idk": 0,
+        "base_X_comp_X_no_idk": 1123,
+        "base_X_comp_X_with_idk": 0,
+        "base_O_comp_O_no_idk_pct": 20.35,
+        "base_O_comp_O_with_idk_pct": 0.0,
+        "base_O_comp_X_no_idk_pct": 13.1,
+        "base_O_comp_X_with_idk_pct": 0.0,
+        "base_X_comp_O_no_idk_pct": 10.4,
+        "base_X_comp_O_with_idk_pct": 0.0,
+        "base_X_comp_X_no_idk_pct": 56.15,
+        "base_X_comp_X_with_idk_pct": 0.0
+      }
+    },
+    {
+      "name": "base_model_vs_sft_dpo",
+      "statistics": {
+        "both_correct": 392,
+        "both_incorrect": 1147,
+        "base_correct_other_incorrect": 277,
+        "base_incorrect_other_correct": 184,
+        "total_compared": 2000,
+        "missing_in_comparison": 0,
+        "both_correct_pct": 19.6,
+        "both_incorrect_pct": 57.35,
+        "base_correct_other_incorrect_pct": 13.85,
+        "base_incorrect_other_correct_pct": 9.2
+      },
+      "idk_detailed_statistics": {
+        "base_O_comp_O_no_idk": 365,
+        "base_O_comp_O_with_idk": 27,
+        "base_O_comp_X_no_idk": 217,
+        "base_O_comp_X_with_idk": 60,
+        "base_X_comp_O_no_idk": 141,
+        "base_X_comp_O_with_idk": 43,
+        "base_X_comp_X_no_idk": 654,
+        "base_X_comp_X_with_idk": 493,
+        "base_O_comp_O_no_idk_pct": 18.25,
+        "base_O_comp_O_with_idk_pct": 1.35,
+        "base_O_comp_X_no_idk_pct": 10.85,
+        "base_O_comp_X_with_idk_pct": 3.0,
+        "base_X_comp_O_no_idk_pct": 7.05,
+        "base_X_comp_O_with_idk_pct": 2.15,
+        "base_X_comp_X_no_idk_pct": 32.7,
+        "base_X_comp_X_with_idk_pct": 24.65
+      }
+    },
+    {
+      "name": "base_model_vs_sft_dpo2",
+      "statistics": {
+        "both_correct": 394,
+        "both_incorrect": 1164,
+        "base_correct_other_incorrect": 275,
+        "base_incorrect_other_correct": 167,
+        "total_compared": 2000,
+        "missing_in_comparison": 0,
+        "both_correct_pct": 19.7,
+        "both_incorrect_pct": 58.2,
+        "base_correct_other_incorrect_pct": 13.75,
+        "base_incorrect_other_correct_pct": 8.35
+      },
+      "idk_detailed_statistics": {
+        "base_O_comp_O_no_idk": 354,
+        "base_O_comp_O_with_idk": 40,
+        "base_O_comp_X_no_idk": 212,
+        "base_O_comp_X_with_idk": 63,
+        "base_X_comp_O_no_idk": 126,
+        "base_X_comp_O_with_idk": 41,
+        "base_X_comp_X_no_idk": 625,
+        "base_X_comp_X_with_idk": 539,
+        "base_O_comp_O_no_idk_pct": 17.7,
+        "base_O_comp_O_with_idk_pct": 2.0,
+        "base_O_comp_X_no_idk_pct": 10.6,
+        "base_O_comp_X_with_idk_pct": 3.15,
+        "base_X_comp_O_no_idk_pct": 6.3,
+        "base_X_comp_O_with_idk_pct": 2.05,
+        "base_X_comp_X_no_idk_pct": 31.25,
+        "base_X_comp_X_with_idk_pct": 26.95
+      }
+    }
+  ]
+}
