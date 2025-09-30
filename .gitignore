@@ -24,7 +24,8 @@ dataset/new_sft/halueval/
 dataset/new_sft/medqa/
 dataset/sciq/
 *.arrow
-*.jsonl
+dataset/**/*.jsonl
+halu_model/**/*.jsonl
 
 # Model checkpoints
 halu_model/halueval/
