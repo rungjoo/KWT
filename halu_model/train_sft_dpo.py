@@ -2,7 +2,7 @@ import os
 import torch
 import json
 import math
-import copy
+import copy, random
 import argparse
 import wandb
 from datasets import Dataset
@@ -21,22 +21,127 @@ warnings.filterwarnings("ignore")
 # 1) 데이터 로딩 (SFT/DPO 구분)
 ######################################
 # def sft_dpo(item, base_match, self_sft_match):
+    # if base_match and self_sft_match:
+    #     item['response'] = right_answer
+    #     item['loss_type'] = 'sft'
+    # elif not base_match and not self_sft_match:
+    #     item['response'] = f"{right_answer} <IDK>"
+    #     item['loss_type'] = 'sft_idk'
+    # elif base_match and not self_sft_match:
+    #     item['chosen'] = base_answer
+    #     item['rejected'] = f"{self_sft_answer} <IDK>" 
+    #     item['loss_type'] = 'dpo'
+    # elif not base_match and self_sft_match:
+    #     item['chosen'] = self_sft_answer
+    #     item['rejected'] = f"{base_answer} <IDK>" 
+    #     item['loss_type'] = 'dpo' 
+
+# def sft_dpo2(item, base_match, self_sft_match):
+    # if base_match and self_sft_match:
+    #     item['response'] = right_answer
+    #     item['loss_type'] = 'sft'
+    # elif not base_match and not self_sft_match:
+    #     item['response'] = f"{right_answer} <IDK>"
+    #     item['loss_type'] = 'sft_idk'
+    # elif base_match and not self_sft_match:
+    #     item['chosen'] = right_answer
+    #     item['rejected'] = f"{self_sft_answer} <IDK>" 
+    #     item['loss_type'] = 'dpo'
+    # elif not base_match and self_sft_match:
+    #     item['chosen'] = right_answer
+    #     item['rejected'] = f"{base_answer} <IDK>"
+    #     item['loss_type'] = 'dpo'
+
+# def sft_no_dpo(item, base_match, self_sft_match):
 #     if base_match and self_sft_match:
 #         item['response'] = right_answer
 #         item['loss_type'] = 'sft'
 #     elif not base_match and not self_sft_match:
 #         item['response'] = f"{right_answer} <IDK>"
 #         item['loss_type'] = 'sft_idk'
+
+# def rtuning(item, base_match, self_sft_match):
+    # if base_match:
+    #     item['response'] = right_answer
+    #     item['loss_type'] = 'sft'
+    # else:
+    #     item['response'] = f"{right_answer} <IDK>"
+    #     item['loss_type'] = 'sft_idk'
+
+# def sft_dpo3(item, base_match, self_sft_match):
+    # if base_match and self_sft_match:
+    #     item['response'] = right_answer
+    #     item['loss_type'] = 'sft'
+    # elif not base_match and not self_sft_match:
+    #     false_answer = random.choice([self_sft_answer, base_answer])
+    #     item['response'] = f"{false_answer} <IDK>"
+    #     item['loss_type'] = 'sft_idk'
+    # elif base_match and not self_sft_match:
+    #     item['chosen'] = right_answer
+    #     item['rejected'] = f"{self_sft_answer} <IDK>" 
+    #     item['loss_type'] = 'dpo'
+    # elif not base_match and self_sft_match:
+    #     item['chosen'] = right_answer
+    #     item['rejected'] = f"{base_answer} <IDK>"
+    #     item['loss_type'] = 'dpo'
+
+# def sft_dpo4(item, base_match, self_sft_match):
+    # if base_match and self_sft_match:
+    #     item['response'] = right_answer
+    #     item['loss_type'] = 'sft'
+    #     data_type.append(copy.deepcopy(item))
+
+    #     item['chosen'] = right_answer
+    #     item['rejected'] = f"{right_answer} <IDK>" 
+    #     item['loss_type'] = 'dpo'
+    #     data_type.append(copy.deepcopy(item))
+    # elif not base_match and not self_sft_match:
+    #     false_answer = random.choice([self_sft_answer, base_answer])
+
+    #     item['response'] = f"{false_answer} <IDK>"
+    #     item['loss_type'] = 'sft_idk'
+    #     data_type.append(copy.deepcopy(item))
+
+    #     item['chosen'] = f"{false_answer} <IDK>" 
+    #     item['rejected'] = false_answer
+    #     item['loss_type'] = 'dpo'
+    #     data_type.append(copy.deepcopy(item))
+    # elif base_match and not self_sft_match:
+    #     item['response'] = f"{right_answer}"
+    #     item['loss_type'] = 'sft'
+    #     data_type.append(copy.deepcopy(item))
+
+    #     item['chosen'] = right_answer
+    #     item['rejected'] = f"{self_sft_answer} <IDK>" 
+    #     item['loss_type'] = 'dpo'
+    #     data_type.append(copy.deepcopy(item))
+    # elif not base_match and self_sft_match:
+    #     item['response'] = f"{right_answer}"
+    #     item['loss_type'] = 'sft'
+    #     data_type.append(copy.deepcopy(item))
+
+    #     item['chosen'] = right_answer
+    #     item['rejected'] = f"{base_answer} <IDK>"
+    #     item['loss_type'] = 'dpo'    
+    #     data_type.append(copy.deepcopy(item))
+
+# def sft_dpo5(item, base_match, self_sft_match):
+#     if base_match and self_sft_match:
+#         item['response'] = right_answer
+#         item['loss_type'] = 'sft'
+#     elif not base_match and not self_sft_match:
+#         item['response'] = f"<IDK>"
+#         item['loss_type'] = 'sft_idk'
 #     elif base_match and not self_sft_match:
-#         item['chosen'] = base_answer
-#         item['rejected'] = f"{self_sft_answer} <IDK>" 
+#         item['chosen'] = right_answer
+#         item['rejected'] = f"<IDK>" 
 #         item['loss_type'] = 'dpo'
 #     elif not base_match and self_sft_match:
-#         item['chosen'] = self_sft_answer
-#         item['rejected'] = f"{base_answer} <IDK>" 
-#         item['loss_type'] = 'dpo' 
+#         item['chosen'] = right_answer
+#         item['rejected'] = f"{base_answer} <IDK>"
+#         item['loss_type'] = 'dpo'        
 
-# def sft_dpo2(item, base_match, self_sft_match):
+# def sft_dpo6(item, base_match, self_sft_match):
 #     if base_match and self_sft_match:
 #         item['response'] = right_answer
 #         item['loss_type'] = 'sft'
@@ -52,32 +157,19 @@ warnings.filterwarnings("ignore")
 #         item['rejected'] = f"{base_answer} <IDK>"
 #         item['loss_type'] = 'dpo'
 
-# def sft3(item, base_match, self_sft_match):
-#     if base_match and self_sft_match:
-#         item['response'] = right_answer
-#         item['loss_type'] = 'sft'
-#         data_type.append(item)
-#     elif not base_match and not self_sft_match:
-#         item['response'] = f"{right_answer} <IDK>"
-#         item['loss_type'] = 'sft_idk'
-#         data_type.append(item)
-#     elif base_match and not self_sft_match:
-#         item['response'] = f"{right_answer}"
-#         item['loss_type'] = 'sft'
-#         data_type.append(copy.deepcopy(item))
-
-#         item['response'] = f"{self_sft_answer} <IDK>"
-#         item['loss_type'] = 'sft_idk'
-#         data_type.append(copy.deepcopy(item))
-#     elif not base_match and self_sft_match:
-#         item['response'] = f"{right_answer}"
-#         item['loss_type'] = 'sft'
-#         data_type.append(copy.deepcopy(item))
-
-#         item['response'] = f"{base_answer} <IDK>"
-#         item['loss_type'] = 'sft_idk'
-#         data_type.append(copy.deepcopy(item))
-
+def sft1(item, base_match, self_sft_match):
+    if base_match and self_sft_match:
+        item['response'] = right_answer
+        item['loss_type'] = 'sft'
+    elif not base_match and not self_sft_match:
+        item['response'] = f"{right_answer} <IDK>"
+        item['loss_type'] = 'sft_idk'
+    elif base_match and not self_sft_match:
+        item['response'] = f"{right_answer}"
+        item['loss_type'] = 'sft_harder'
+    elif not base_match and self_sft_match:
+        item['response'] = f"{right_answer}"
+        item['loss_type'] = 'sft_harder'
 
 def load_data(filepath):    
     with open(filepath, 'r', encoding='utf-8') as f:
@@ -99,27 +191,17 @@ def load_data(filepath):
         if base_match and self_sft_match:
             item['response'] = right_answer
             item['loss_type'] = 'sft'
-            data_type.append(item)
         elif not base_match and not self_sft_match:
             item['response'] = f"{right_answer} <IDK>"
             item['loss_type'] = 'sft_idk'
-            data_type.append(item)
         elif base_match and not self_sft_match:
             item['response'] = f"{right_answer}"
-            item['loss_type'] = 'sft'
-            data_type.append(copy.deepcopy(item))
-
-            item['response'] = f"{self_sft_answer} <IDK>"
-            item['loss_type'] = 'sft_idk'
-            data_type.append(copy.deepcopy(item))
+            item['loss_type'] = 'sft_harder'
         elif not base_match and self_sft_match:
             item['response'] = f"{right_answer}"
-            item['loss_type'] = 'sft'
-            data_type.append(copy.deepcopy(item))
-
-            item['response'] = f"{base_answer} <IDK>"
-            item['loss_type'] = 'sft_idk'
-            data_type.append(copy.deepcopy(item))
+            item['loss_type'] = 'sft_harder'
+        if 'loss_type' in item:
+            data_type.append(item)
     return data_type
 
 ######################################
@@ -144,7 +226,7 @@ def preprocess_tokenize(item, tokenizer, max_length=1024):
         "prompt_len": None,
     }
 
-    if loss_type in ["sft", "sft_idk"]:
+    if loss_type in ["sft", "sft_idk", "sft_harder"]:
         full_text = prompt + " " + item['response'] + tokenizer.eos_token
         tokenized = tokenizer(full_text, truncation=True, max_length=max_length, return_tensors=None)
         input_ids = tokenized["input_ids"]
@@ -207,6 +289,7 @@ class MixedSftDpoCollator:
     def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         sft_items = [b for b in batch if b["loss_type"] == "sft"]
         sft_idk_items = [b for b in batch if b["loss_type"] == "sft_idk"]
+        sft_harder_items = [b for b in batch if b["loss_type"] == "sft_harder"]
         dpo_items = [b for b in batch if b["loss_type"] == "dpo"]
 
         collated: Dict[str, Any] = {}
@@ -232,7 +315,18 @@ class MixedSftDpoCollator:
                 "attention_mask": sft_idk_attn,
                 "labels": sft_idk_labels,
             }
-        
+
+        if len(sft_harder_items) > 0:
+            sft_harder_input_ids = [x['input_ids'] for x in sft_harder_items]
+            sft_harder_labels = [x['labels'] for x in sft_harder_items]
+            sft_harder_input, sft_harder_attn = self.padding_input(sft_harder_input_ids)
+            sft_harder_labels = self.padding_label(sft_harder_labels, max_len=sft_harder_input.size(1))
+            collated["sft_harder"] = {
+                "input_ids": sft_harder_input,
+                "attention_mask": sft_harder_attn,
+                "labels": sft_harder_labels,
+            }
+
         if len(dpo_items) > 0:
             chosen_input_ids = [x['chosen_input_ids'] for x in dpo_items]
             rejected_input_ids = [x['rejected_input_ids'] for x in dpo_items]
@@ -281,7 +375,7 @@ class MixedSftDpoCollator:
 # 4) 커스텀 Trainer
 ######################################    
 class MixedTrainer(Trainer):
-    def __init__(self, *args, ref_model=None, dpo_beta=0.1, sft_weight=1.0, dpo_weight=1.0, sft_idk_weight=0.1, **kwargs):
+    def __init__(self, *args, ref_model=None, dpo_beta=0.1, sft_weight=1.0, dpo_weight=1.0, sft_idk_weight=0.1, sft_harder_weight=1.0, **kwargs):
         super().__init__(*args, **kwargs)
         assert ref_model is not None, "ref_model must be provided for DPO."
         self.ref_model = ref_model
@@ -289,6 +383,7 @@ class MixedTrainer(Trainer):
         self.sft_weight = sft_weight
         self.dpo_weight = dpo_weight
         self.sft_idk_weight = sft_idk_weight  # Weight for IDK cases
+        self.sft_harder_weight = sft_harder_weight  # Weight for harder cases
         # ref_model은 고정
         for p in self.ref_model.parameters():
             p.requires_grad_(False)
@@ -315,6 +410,14 @@ class MixedTrainer(Trainer):
             sft_idk_loss = outputs.loss
             total_loss = total_loss + self.sft_idk_weight * sft_idk_loss
             logs["sft_idk/loss"] = sft_idk_loss.detach().item()
+
+        # SFT_HARDER loss (for harder cases)
+        if "sft_harder" in inputs:
+            sft_harder_batch = self._prepare_inputs(inputs["sft_harder"])
+            outputs = model(**sft_harder_batch)
+            sft_harder_loss = outputs.loss
+            total_loss = total_loss + self.sft_harder_weight * sft_harder_loss
+            logs["sft_harder/loss"] = sft_harder_loss.detach().item()
 
         # DPO loss
         if "dpo" in inputs:
@@ -415,7 +518,7 @@ def sequence_logprobs(model, input_ids, attention_mask, prompt_len: torch.Tensor
 
 def main(args):
     # Initialize wandb
-    wandb_run_name = f"{args.dataname}_{args.save_run_name}-{args.epochs}-{args.dpo_beta}_{args.sft_weight}_{args.dpo_weight}_{args.sft_idk_weight}"
+    wandb_run_name = f"{args.dataname}_{args.save_run_name}-{args.epochs}-{args.dpo_beta}_{args.sft_weight}_{args.dpo_weight}_{args.sft_idk_weight}_{args.sft_harder_weight}"
     wandb.init(
         project=args.wandb_project,
         name=wandb_run_name,
@@ -430,6 +533,7 @@ def main(args):
             "sft_weight": args.sft_weight,
             "dpo_weight": args.dpo_weight,
             "sft_idk_weight": args.sft_idk_weight,
+            "sft_harder_weight": args.sft_harder_weight,
             "max_length": args.max_length,
         }
     )
@@ -513,7 +617,8 @@ def main(args):
         warmup_ratio=0.03,
         weight_decay=0.01,
         logging_steps= args.logging_steps,
-        save_steps= args.save_steps,
+        # save_steps= args.save_steps,
+        save_strategy="no", 
         save_total_limit=2,
         bf16=torch.cuda.is_available(),  # A100/H100면 bf16, 아니면 자동으로 fp32 사용
         remove_unused_columns=False,     # collator가 dict 구조를 유지하도록
@@ -530,6 +635,7 @@ def main(args):
         sft_weight=args.sft_weight,
         dpo_weight=args.dpo_weight,
         sft_idk_weight=args.sft_idk_weight,
+        sft_harder_weight=args.sft_harder_weight,
     )
 
     trainer.train()
@@ -540,6 +646,7 @@ def main(args):
 if __name__ == "__main__":
     # python3 train_sft_dpo.py --dataname halueval --epochs 3 --save_steps 250 --dpo_weight 0.5 --sft_idk_weight 0.1 --save_run_name sft_dpo
     # python3 train_sft_dpo.py --dataname medqa --epochs 3 --save_steps 250 --dpo_weight 0.5 --sft_idk_weight 0.1 --save_run_name sft_dpo
+    # python3 train_sft_dpo.py --dataname sciq --epochs 3 --save_steps 250 --dpo_weight 0.5 --sft_idk_weight 0.1 --save_run_name sft_dpo
     parser = argparse.ArgumentParser(description='Evaluate model answers using LLM')
     parser.add_argument('--dataname', type=str, required=True, help='Dataset name (e.g., halueval, medqa)')
     parser.add_argument('--model_path', type=str, default="../../model/Llama-3.2-3B")
@@ -551,13 +658,14 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=2e-5)
 
     parser.add_argument('--logging_steps', type=int, default=10)
-    parser.add_argument('--save_steps', type=int, default=200)
+    parser.add_argument('--save_steps', type=int, default=250)
 
     # DPO 하이퍼파라미터 및 loss 가중치
     parser.add_argument('--dpo_beta', type=float, default=0.1)
     parser.add_argument('--sft_weight', type=float, default=1.0)
     parser.add_argument('--dpo_weight', type=float, default=0.5)
     parser.add_argument('--sft_idk_weight', type=float, default=0.1, help='Weight for SFT loss on IDK samples')
+    parser.add_argument('--sft_harder_weight', type=float, default=1.0, help='Weight for SFT loss on harder samples')
 
     # Wandb configuration
     parser.add_argument('--wandb_project', type=str, default="hall-sft-dpo", help='WandB project name')
@@ -567,7 +675,8 @@ if __name__ == "__main__":
 
     # Set train_data_path and output_dir based on dataname
     args.train_data_path = f"../dataset_type/{args.dataname}/merged/merged_evaluated.json"
-    args.output_dir = f"./{args.dataname}/{args.save_run_name}"
+    # args.output_dir = f"./{args.dataname}/{args.save_run_name}/dpo{args.dpo_weight}_sft_idk{args.sft_idk_weight}"
+    args.output_dir = f"/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{args.save_run_name}/dpo{args.dpo_weight}_sft_idk{args.sft_idk_weight}_sft_harder{args.sft_harder_weight}"
 
     print(f"Dataset: {args.dataname}")
     print(f"Train data path: {args.train_data_path}")

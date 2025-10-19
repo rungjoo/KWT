@@ -241,6 +241,7 @@ def main(args):
 if __name__ == "__main__":
     # python3 train_sft.py --dataname halueval --epochs 3 --save_steps 250 --save_run_name sft
     # python3 train_sft.py --dataname medqa --epochs 3 --save_steps 250 --save_run_name sft
+    # python3 train_sft.py --dataname sciq --epochs 3 --save_steps 250 --save_run_name sft
     parser = argparse.ArgumentParser(description='Evaluate model answers using LLM')
     parser.add_argument('--dataname', type=str, required=True, help='Dataset name (e.g., halueval, medqa)')
     parser.add_argument('--model_path', type=str, default="../../model/Llama-3.2-3B")

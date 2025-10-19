@@ -163,14 +163,13 @@ def process_results_file(file_path, model, tokenizer):
 
 def main():
     parser = argparse.ArgumentParser(description='Evaluate model answers using LLM')
-    # python3 02_answer_check.py --input_file halueval/base_model_results.jsonl --model_path ../model/Llama-3.1-8B-Instruct
     # python3 02_answer_check.py --input_file halueval/instruct_model_results.jsonl
     # python3 02_answer_check.py --input_file halueval/self_sft_model_results.jsonl
     # python3 02_answer_check.py --input_file medqa/self_sft_model_results.jsonl
     parser.add_argument('--input_file', type=str, required=True,
                        help='Path to JSONL file (e.g., halueval/base_model_results.jsonl)')
     parser.add_argument('--model_path', type=str, 
-                       default='../model/gemma-3-12b-it',
+                       default='../../model/gemma-3-12b-it',
                        help='Path to Instruction model')
     
     args = parser.parse_args()

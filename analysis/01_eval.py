@@ -18,9 +18,9 @@ def create_few_shot_prompt(question, examples=None):
     if examples:
         prompt += "Here are some examples:\n\n"
         for ex in examples:
+            ex_knowledge = ex.get('knowledge') or ex.get('support')
             prompt += f"Question: {ex['question']}\n"
-            # Handle both 'right_answer' and 'answer' keys
-            answer = ex.get('right_answer', ex.get('answer', ''))
+            answer = ex.get('right_answer', ex.get('correct_answer', ex.get('answer', '')))
             prompt += f"Answer: {answer}\n\n"
 
     prompt += f"Question: {question}\n"
@@ -54,6 +54,7 @@ def inference_base_model(model_path, data, fewshot=3, device='cuda', batch_size=
     results = []
     
     for item in tqdm(data, desc="Base model inference"):
+        knowledge = item.get('knowledge') or item.get('support')
         prompt = create_few_shot_prompt(
             item['question'],
             examples=few_shot_examples
@@ -77,15 +78,32 @@ def inference_base_model(model_path, data, fewshot=3, device='cuda', batch_size=
         model_answer_full = answer
         filtered_model_answer = model_answer_full.split('\n\n')[0].strip() if model_answer_full else ''
 
-        results.append({
-            'knowledge': item.get('knowledge', ''),
+        result = {
             'question': item['question'],
-            'right_answer': item.get('right_answer', item.get('answer', '')),
-            'hallucinated_answer': item.get('hallucinated_answer', ''),
             'model_answer': model_answer_full,
             'filtered_model_answer': filtered_model_answer,
-            "prompt": prompt
-        })
+            'prompt': prompt
+        }
+
+        # Add knowledge field (handle both 'knowledge' and 'support')
+        if 'knowledge' in item:
+            result['knowledge'] = item['knowledge']
+        elif 'support' in item:
+            result['knowledge'] = item['support']
+
+        # Add right_answer field (handle different field names)
+        if 'right_answer' in item:
+            result['right_answer'] = item['right_answer']
+        elif 'correct_answer' in item:
+            result['right_answer'] = item['correct_answer']
+        elif 'answer' in item:
+            result['right_answer'] = item['answer']
+
+        # Add optional fields
+        if 'hallucinated_answer' in item:
+            result['hallucinated_answer'] = item['hallucinated_answer']
+
+        results.append(result)
     
     return results
 
@@ -124,15 +142,32 @@ def inference_instruct_model(model_path, data, device='cuda', batch_size=1):
         model_answer_full = answer
         filtered_model_answer = model_answer_full.split('\n\n')[0].strip() if model_answer_full else ''
 
-        results.append({
-            'knowledge': item.get('knowledge', ''),
+        result = {
             'question': item['question'],
-            'right_answer': item.get('right_answer', item.get('answer', '')),
-            'hallucinated_answer': item.get('hallucinated_answer', ''),
             'model_answer': model_answer_full,
             'filtered_model_answer': filtered_model_answer,
             'prompt': prompt
-        })
+        }
+
+        # Add knowledge field (handle both 'knowledge' and 'support')
+        if 'knowledge' in item:
+            result['knowledge'] = item['knowledge']
+        elif 'support' in item:
+            result['knowledge'] = item['support']
+
+        # Add right_answer field (handle different field names)
+        if 'right_answer' in item:
+            result['right_answer'] = item['right_answer']
+        elif 'correct_answer' in item:
+            result['right_answer'] = item['correct_answer']
+        elif 'answer' in item:
+            result['right_answer'] = item['answer']
+
+        # Add optional fields
+        if 'hallucinated_answer' in item:
+            result['hallucinated_answer'] = item['hallucinated_answer']
+
+        results.append(result)
     
     return results
 
@@ -144,26 +179,32 @@ def save_results(results, output_path):
     print(f"Results saved to {output_path}")
 
 def main():
-    # python3 01_eval.py --dataname halueval --save_run_name sft_dpo
-    # python3 01_eval.py --dataname medqa --save_run_name sft_dpo
+    # python3 01_eval.py --dataname halueval --save_run_name sft_dpo --dpo_weight 0.5 --sft_idk_weight 0.5
+    # python3 01_eval.py --dataname medqa --save_run_name sft_dpo --dpo_weight 0.5 --sft_idk_weight 0.5
     parser = argparse.ArgumentParser(description='Inference on train.jsonl using two models')
-    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa'], help='Dataset name (halueval or medqa)')
+    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa', 'sciq'], help='Dataset name (halueval or medqa)')
     parser.add_argument('--base_model', type=str, default='../../model/Llama-3.2-3B', help='Path to base model')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use')
     parser.add_argument('--fewshot', type=int, default=3, help='The number of fewshot samples')
     parser.add_argument('--save_run_name', type=str, default="sft_dpo", help='WandB run name (optional)')
+    parser.add_argument('--dpo_weight', type=float, default=0.5, help='DPO weight used in training')
+    parser.add_argument('--sft_idk_weight', type=float, default=0.5, help='SFT IDK weight used in training')
 
     args = parser.parse_args()
 
     # Set data_path and output_dir based on dataname
-    args.sft_model = f'../halu_model/{args.dataname}/sft'
-    args.sft_dpo_model = f'../halu_model/{args.dataname}/{args.save_run_name}'        
+    args.sft_model = f'../halu_model/{args.dataname}/sft'    
+    # args.sft_dpo_model = f'../halu_model/{args.dataname}/{args.save_run_name}/dpo{args.dpo_weight}_sft_idk{args.sft_idk_weight}'
+    args.sft_dpo_model = f"/mnt/frdata/rungjoo/hall//halu_model/{args.dataname}/{args.save_run_name}/dpo{args.dpo_weight}_sft_idk{args.sft_idk_weight}"
     if args.dataname == 'halueval':        
         args.data_path = '../dataset/new_sft/halueval/halueval_test.jsonl'
         args.output_dir = 'halueval/llama_3.2-3b'
     elif args.dataname == 'medqa':
         args.data_path = '../dataset/new_sft/medqa/test.jsonl'
         args.output_dir = 'medqa/llama_3.2-3b'
+    elif args.dataname == 'sciq':
+        args.data_path = '../dataset/new_sft/sciq/test.jsonl'
+        args.output_dir = 'sciq/llama_3.2-3b'
     
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     
@@ -180,7 +221,7 @@ def main():
 
     print("\n=== Running SFT-DPO Model ===")
     sft_results = inference_instruct_model(args.sft_dpo_model, data, device=args.device)
-    save_results(sft_results, f"{args.output_dir}/{args.save_run_name}.jsonl")
+    save_results(sft_results, f"{args.output_dir}/{args.save_run_name}_dpo{args.dpo_weight}_sft_idk{args.sft_idk_weight}.jsonl")
     
     print("\nInference completed!")
 

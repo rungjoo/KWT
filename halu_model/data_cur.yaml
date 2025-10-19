@@ -21,7 +21,7 @@ modes:
             chosen: "{self_sft_answer}"
             rejected: "{base_answer} <IDK>"
 
-  sft_dpo2:                   # 당신의 sft_dpo2()에 해당
+  sft_dpo2:                   
     rules:
       "11":
         emit:
@@ -41,8 +41,215 @@ modes:
           - type: dpo
             chosen: "{right_answer}"
             rejected: "{base_answer} <IDK>"
+  sft_dpo3:                   
+    rules:
+      "11":
+        emit:
+          - type: sft
+            response: "{right_answer}"
+      "00":
+        emit:
+          - type: sft_idk
+            false_answer: random.choice([self_sft_answer, base_answer])
+            response: "{false_answer} <IDK>"
+      "10":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{self_sft_answer} <IDK>"
+      "01":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{base_answer} <IDK>"        
 
-  sft3:                       # 당신의 sft3()에 해당
+  sft_dpo4:                   
+    rules:
+      "11":
+        emit:
+          - type: sft
+            response: "{right_answer}"
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{right_answer} <IDK>"
+      "00":
+        emit:
+          - type: sft_idk
+            false_answer: random.choice([self_sft_answer, base_answer])
+            response: "{false_answer} <IDK>"
+          - type: dpo
+            chosen: "{false_answer} <IDK>"
+            rejected: "{false_answer}"            
+      "10":
+        emit:
+          - type: sft
+            response: "{right_answer}"
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{self_sft_answer} <IDK>"            
+      "01":
+        emit:
+          - type: sft
+            response: "{right_answer}"
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{base_answer} <IDK>"            
+
+  sft_dpo5:                   
+    rules:
+      "11":
+        emit:
+          - type: sft
+            response: "{right_answer}"
+      "00":
+        emit:
+          - type: sft_idk
+            response: "<IDK>"
+      "10":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "<IDK>"
+      "01":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "<IDK>"
+
+  sft_dpo6:                   
+    rules:
+      "11":
+        emit:
+          - type: sft
+            response: "{right_answer}"
+      "00":
+        emit:
+          - type: sft_idk
+            response: "{right_answer} <IDK>"
+      "10":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{self_sft_answer} <IDK>"
+      "01":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{base_answer} <IDK>"             
+
+  dpo_b0:                   
+    rules:
+      "11":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{right_answer} <IDK>"
+      "00":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{right_answer} <IDK>"
+      "10":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{right_answer} <IDK>"
+      "01":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{right_answer} <IDK>"
+
+  dpo_b1:                   
+    rules:
+      "11":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{right_answer} <IDK>"
+      "00":
+        emit:
+          - type: dpo
+            chosen: "{right_answer} <IDK>"
+            rejected: "{right_answer}"
+      "10":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{right_answer} <IDK>"
+      "01":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{right_answer} <IDK>"            
+            
+  dpo1:                   
+    rules:
+      "11":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "<IDK>"
+      "00":
+        emit:
+          - type: dpo
+            chosen: "<IDK>"
+            rejected: random.choice([self_sft_answer, base_answer])
+      "10":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "<IDK>"
+      "01":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "<IDK>"   
+
+  dpo2:                   
+    rules:
+      "11":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{right_answer} <IDK>" 
+      "00":
+        emit:
+          - type: dpo
+            false_answer: random.choice([self_sft_answer, base_answer])
+            chosen: "{false_answer} <IDK>" 
+            rejected: "{false_answer}"
+      "10":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{self_sft_match} <IDK>"
+      "01":
+        emit:
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{base_match} <IDK>"
+
+  sft1:                       
+    rules:
+      "11":
+        emit:
+          - type: sft
+            response: "{right_answer}"
+      "00":
+        emit:
+          - type: sft_idk
+            response: "{right_answer} <IDK>"
+      "10":
+        emit:
+          - type: sft_harder
+            response: "{right_answer}"
+      "01":
+        emit:
+          - type: sft_harder
+            response: "{right_answer}"
+
+  sft3:                       
     rules:
       "11":
         emit:
@@ -64,3 +271,33 @@ modes:
             response: "{right_answer}"
           - type: sft_idk
             response: "{base_answer} <IDK>"
+
+  sft_no_dpo:                       
+    rules:
+      "11":
+        emit:
+          - type: sft
+            response: "{right_answer}"
+      "00":
+        emit:
+          - type: sft_idk
+            response: "{right_answer} <IDK>"
+
+  rtuning:                       
+    rules:
+      "11":
+        emit:
+          - type: sft
+            response: "{right_answer}"
+      "00":
+        emit:
+          - type: sft_idk
+            response: "{right_answer} <IDK>"
+      "10":
+        emit:
+          - type: sft
+            response: "{right_answer}"
+      "01":
+        emit:
+          - type: sft_idk
+            response: "{right_answer} <IDK>"

@@ -12,20 +12,16 @@ def load_dataset(file_path):
             data.append(json.loads(line.strip()))
     return data
 
-def create_few_shot_prompt(question, examples=None, knowledge=None):
+def create_few_shot_prompt(question, examples=None):
     prompt = ""
 
     if examples:
         prompt += "Here are some examples:\n\n"
         for ex in examples:
-            if 'knowledge' in ex and ex['knowledge']:
-                prompt += f"Knowledge: {ex['knowledge']}\n"
             prompt += f"Question: {ex['question']}\n"
-            answer_key = 'answer' if 'answer' in ex else 'right_answer'
+            answer_key = 'answer' if 'answer' in ex else ('correct_answer' if 'correct_answer' in ex else 'right_answer')
             prompt += f"Answer: {ex[answer_key]}\n\n"
 
-    if knowledge:
-        prompt += f"Knowledge: {knowledge}\n"
     prompt += f"Question: {question}\n"
     prompt += "Answer:"
 
@@ -53,10 +49,10 @@ def inference_base_model(model_path, data, fewshot=3, device='cuda', batch_size=
     results = []
     
     for item in tqdm(data, desc="Base model inference"):
+        knowledge = item.get('knowledge') or item.get('support')
         prompt = create_few_shot_prompt(
             item['question'],
-            examples=few_shot_examples,
-            knowledge=item.get('knowledge')
+            examples=few_shot_examples
         )
         
         inputs = tokenizer(prompt, return_tensors="pt", padding=True).to(device)
@@ -82,10 +78,16 @@ def inference_base_model(model_path, data, fewshot=3, device='cuda', batch_size=
         # Add fields if they exist in the original data
         if 'knowledge' in item:
             result['knowledge'] = item['knowledge']
+        elif 'support' in item:
+            result['knowledge'] = item['support']
+
         if 'right_answer' in item:
             result['right_answer'] = item['right_answer']
+        elif 'correct_answer' in item:
+            result['right_answer'] = item['correct_answer']
         elif 'answer' in item:
             result['right_answer'] = item['answer']
+
         if 'hallucinated_answer' in item:
             result['hallucinated_answer'] = item['hallucinated_answer']
         if 'options' in item:
@@ -134,10 +136,16 @@ def inference_instruct_model(model_path, data, device='cuda', batch_size=1):
         # Add fields if they exist in the original data
         if 'knowledge' in item:
             result['knowledge'] = item['knowledge']
+        elif 'support' in item:
+            result['knowledge'] = item['support']
+
         if 'right_answer' in item:
             result['right_answer'] = item['right_answer']
+        elif 'correct_answer' in item:
+            result['right_answer'] = item['correct_answer']
         elif 'answer' in item:
             result['right_answer'] = item['answer']
+
         if 'hallucinated_answer' in item:
             result['hallucinated_answer'] = item['hallucinated_answer']
 
@@ -155,10 +163,11 @@ def save_results(results, output_path):
 def main():
     # python3 01_inference_models.py --dataname halueval
     # python3 01_inference_models.py --dataname medqa
+    # python3 01_inference_models.py --dataname sciq
     parser = argparse.ArgumentParser(description='Inference on train.jsonl using two models')
-    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa'], help='Dataset name (halueval or medqa)')
-    parser.add_argument('--base_model', type=str, default='../model/Llama-3.2-3B', help='Path to base model')
-    parser.add_argument('--instruct_model', type=str, default='../model/Llama-3.2-3B-Instruct', help='Path to instruct model')
+    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa', 'sciq'], help='Dataset name (halueval, medqa, or sciq)')
+    parser.add_argument('--base_model', type=str, default='../../model/Llama-3.2-3B', help='Path to base model')
+    parser.add_argument('--instruct_model', type=str, default='../../model/Llama-3.2-3B-Instruct', help='Path to instruct model')
     parser.add_argument('--self_sft_model', type=str, default='../ref_model/Llama-3.2-3B-SFT', help='Path to instruct model')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use')
     parser.add_argument('--fewshot', type=int, default=3, help='The number of fewshot samples')
@@ -173,6 +182,9 @@ def main():
     elif args.dataname == 'medqa':
         args.data_path = '../dataset/new_sft/medqa/train.jsonl'
         args.output_dir = './medqa'
+    elif args.dataname == 'sciq':
+        args.data_path = '../dataset/new_sft/sciq/train.jsonl'
+        args.output_dir = './sciq'
     
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     

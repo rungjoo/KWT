@@ -252,33 +252,48 @@ def create_comparison_csv(comparison_result: Dict[str, Any], output_path: str):
 
 
 def main():
-    # python3 03_merge_test_results.py --base halueval/llama_3.2-3b/base_model_evaluated.json --compare halueval/llama_3.2-3b/sft_evaluated.json halueval/llama_3.2-3b/sft_dpo_evaluated.json halueval/llama_3.2-3b/sft_dpo2_evaluated.json --output_dir halueval/llama_3.2-3b/comparison_results
-    # python3 03_merge_test_results.py --base medqa/llama_3.2-3b/base_model_evaluated.json --compare medqa/llama_3.2-3b/sft_evaluated.json medqa/llama_3.2-3b/sft_dpo_evaluated.json medqa/llama_3.2-3b/sft_dpo2_evaluated.json --output_dir medqa/llama_3.2-3b/comparison_results
+    # python3 03_merge_test_results.py --dataname halueval/llama_3.2-3b
+    # python3 03_merge_test_results.py --dataname medqa/llama_3.2-3b
     parser = argparse.ArgumentParser(description='Merge and compare HaluEval evaluation results')
-    parser.add_argument('--base', type=str, required=True,
-                       help='Path to base model evaluated.json file')
-    parser.add_argument('--compare', type=str, nargs='+', required=True,
-                       help='Path(s) to comparison model evaluated.json files')
-    parser.add_argument('--output_dir', type=str, default='./comparison_results',
-                       help='Directory to save comparison results')
+    parser.add_argument('--dataname', type=str, required=True,
+                       help='Directory containing evaluated.json files (e.g., halueval/llama_3.2-3b)')
 
     args = parser.parse_args()
 
+    # Set up paths
+    data_dir = Path(args.dataname)
+    base_path = data_dir / 'base_model_evaluated.json'
+    output_dir = data_dir / 'comparison_results'
+
     # Create output directory if it doesn't exist
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Find all evaluated.json files except base_model_evaluated.json
+    compare_paths = [
+        f for f in data_dir.glob('*_evaluated.json')
+        if f.name != 'base_model_evaluated.json'
+    ]
+
+    if not base_path.exists():
+        print(f"Error: Base model file not found at {base_path}")
+        return
+
+    if not compare_paths:
+        print(f"Error: No comparison evaluated.json files found in {data_dir}")
+        return
 
     # Load base model results
-    print(f"Loading base model results from: {args.base}")
-    base_results = load_evaluated_results(args.base)
-    base_name = Path(args.base).stem.replace('_evaluated', '')
+    print(f"Loading base model results from: {base_path}")
+    base_results = load_evaluated_results(str(base_path))
+    base_name = base_path.stem.replace('_evaluated', '')
 
     # Compare with each comparison model
     all_comparisons = []
 
-    for comp_path in args.compare:
+    for comp_path in compare_paths:
         print(f"\nLoading comparison model results from: {comp_path}")
-        comp_results = load_evaluated_results(comp_path)
-        comp_name = Path(comp_path).stem.replace('_evaluated', '')
+        comp_results = load_evaluated_results(str(comp_path))
+        comp_name = comp_path.stem.replace('_evaluated', '')
 
         # Perform comparison
         comparison = compare_model_results(
@@ -293,7 +308,7 @@ def main():
         all_comparisons.append(comparison)
 
     # Save all comparisons summary
-    summary_output_path = os.path.join(args.output_dir, 'all_comparisons_summary.json')
+    summary_output_path = output_dir / 'all_comparisons_summary.json'
     with open(summary_output_path, 'w', encoding='utf-8') as f:
         json.dump({
             'base_model': base_name,

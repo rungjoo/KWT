@@ -342,9 +342,10 @@ def merge_and_analyze_results(file_paths: List[str], base_dir) -> None:
     print(f"   - Questions at least one model got correct: {output_data['summary']['at_least_one_correct']}")
 
 def main():
+    # python3 03_merge_evaluated_results.py --dataname sciq
     import argparse
     parser = argparse.ArgumentParser(description='Merge and analyze evaluated results')
-    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa'],
+    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa', 'sciq'],
                        help='Dataset name (halueval or medqa)')
     args = parser.parse_args()
 
