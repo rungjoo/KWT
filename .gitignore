@@ -27,7 +27,12 @@ dataset/sciq/
 dataset/**/*.jsonl
 halu_model/**/*.jsonl
 
+# Large result files from dataset_type
+dataset_type/**/*.jsonl
+dataset_type/**/*_evaluated*.json
+
 # Model checkpoints
 halu_model/halueval/
 halu_model/medqa/
+halu_model/sciq/
 ref_model/

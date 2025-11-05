@@ -157,19 +157,47 @@ warnings.filterwarnings("ignore")
 #         item['rejected'] = f"{base_answer} <IDK>"
 #         item['loss_type'] = 'dpo'
 
-def sft1(item, base_match, self_sft_match):
+# def sft1(item, base_match, self_sft_match):
+    # if base_match and self_sft_match:
+    #     item['response'] = right_answer
+    #     item['loss_type'] = 'sft'
+    # elif not base_match and not self_sft_match:
+    #     item['response'] = f"{right_answer} <IDK>"
+    #     item['loss_type'] = 'sft_idk'
+    # elif base_match and not self_sft_match:
+    #     item['response'] = f"{right_answer}"
+    #     item['loss_type'] = 'sft_harder'
+    # elif not base_match and self_sft_match:
+    #     item['response'] = f"{right_answer}"
+    #     item['loss_type'] = 'sft_harder'
+
+def sft_dpo7(item, base_match, self_sft_match):
     if base_match and self_sft_match:
         item['response'] = right_answer
         item['loss_type'] = 'sft'
+        data_type.append(copy.deepcopy(item))
     elif not base_match and not self_sft_match:
         item['response'] = f"{right_answer} <IDK>"
         item['loss_type'] = 'sft_idk'
+        data_type.append(copy.deepcopy(item))
     elif base_match and not self_sft_match:
         item['response'] = f"{right_answer}"
         item['loss_type'] = 'sft_harder'
+        data_type.append(copy.deepcopy(item))
+
+        item['chosen'] = right_answer
+        item['rejected'] = f"{self_sft_answer} <IDK>" 
+        item['loss_type'] = 'dpo'
+        data_type.append(copy.deepcopy(item))
     elif not base_match and self_sft_match:
         item['response'] = f"{right_answer}"
         item['loss_type'] = 'sft_harder'
+        data_type.append(copy.deepcopy(item))
+
+        item['chosen'] = right_answer
+        item['rejected'] = f"{base_answer} <IDK>"
+        item['loss_type'] = 'dpo'
+        data_type.append(copy.deepcopy(item))
 
 def load_data(filepath):    
     with open(filepath, 'r', encoding='utf-8') as f:
@@ -192,7 +220,7 @@ def load_data(filepath):
             item['response'] = right_answer
             item['loss_type'] = 'sft'
         elif not base_match and not self_sft_match:
-            item['response'] = f"{right_answer} <IDK>"
+            item['response'] = f"<IDK> {right_answer}"
             item['loss_type'] = 'sft_idk'
         elif base_match and not self_sft_match:
             item['response'] = f"{right_answer}"
@@ -200,6 +228,7 @@ def load_data(filepath):
         elif not base_match and self_sft_match:
             item['response'] = f"{right_answer}"
             item['loss_type'] = 'sft_harder'
+
         if 'loss_type' in item:
             data_type.append(item)
     return data_type

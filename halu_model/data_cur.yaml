@@ -135,7 +135,32 @@ modes:
         emit:
           - type: dpo
             chosen: "{right_answer}"
-            rejected: "{base_answer} <IDK>"             
+            rejected: "{base_answer} <IDK>"    
+
+  sft_dpo7:                       
+    rules:
+      "11":
+        emit:
+          - type: sft
+            response: "{right_answer}"
+      "00":
+        emit:
+          - type: sft_idk
+            response: "{right_answer} <IDK>"
+      "10":
+        emit:
+          - type: sft_harder
+            response: "{right_answer}"
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{self_sft_answer} <IDK>"    
+      "01":
+        emit:
+          - type: sft_harder
+            response: "{right_answer}"  
+          - type: dpo
+            chosen: "{right_answer}"
+            rejected: "{base_answer} <IDK>"    
 
   dpo_b0:                   
     rules:

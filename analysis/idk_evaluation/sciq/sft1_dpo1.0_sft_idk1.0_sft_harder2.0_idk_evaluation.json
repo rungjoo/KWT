@@ -1,0 +1,102 @@
+{
+  "total": 11958,
+  "answerable": {
+    "total": 2266,
+    "correct": 422,
+    "accuracy": 18.62,
+    "with_idk": {
+      "total": 1128,
+      "correct": 82,
+      "incorrect": 1046,
+      "accuracy": 7.27
+    },
+    "without_idk": {
+      "total": 1138,
+      "correct": 340,
+      "incorrect": 798,
+      "accuracy": 29.88
+    }
+  },
+  "unanswerable": {
+    "total": 5283,
+    "idk_count": 3368,
+    "accuracy": 63.75
+  },
+  "dataset_stats": {
+    "NEC": {
+      "total": 4150,
+      "answerable": {
+        "total": 2072,
+        "correct": 0,
+        "accuracy": 0.0,
+        "with_idk": {
+          "total": 1384,
+          "correct": 0,
+          "incorrect": 0,
+          "accuracy": 0.0
+        },
+        "without_idk": {
+          "total": 688,
+          "correct": 0,
+          "incorrect": 0,
+          "accuracy": 0.0
+        }
+      },
+      "unanswerable": {
+        "total": 2078,
+        "idk_count": 1533,
+        "accuracy": 73.77
+      }
+    },
+    "selfAware": {
+      "total": 3369,
+      "answerable": {
+        "total": 2337,
+        "correct": 748,
+        "accuracy": 32.01,
+        "with_idk": {
+          "total": 1097,
+          "correct": 162,
+          "incorrect": 935,
+          "accuracy": 14.77
+        },
+        "without_idk": {
+          "total": 1240,
+          "correct": 586,
+          "incorrect": 654,
+          "accuracy": 47.26
+        }
+      },
+      "unanswerable": {
+        "total": 1032,
+        "idk_count": 328,
+        "accuracy": 31.78
+      }
+    },
+    "RefuNQ": {
+      "total": 4439,
+      "answerable": {
+        "total": 2266,
+        "correct": 422,
+        "accuracy": 18.62,
+        "with_idk": {
+          "total": 1128,
+          "correct": 82,
+          "incorrect": 1046,
+          "accuracy": 7.27
+        },
+        "without_idk": {
+          "total": 1138,
+          "correct": 340,
+          "incorrect": 798,
+          "accuracy": 29.88
+        }
+      },
+      "unanswerable": {
+        "total": 2173,
+        "idk_count": 1507,
+        "accuracy": 69.35
+      }
+    }
+  }
+}

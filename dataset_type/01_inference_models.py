@@ -4,6 +4,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 import argparse
 from pathlib import Path
+import random
 
 def load_dataset(file_path):
     data = []
@@ -27,15 +28,7 @@ def create_few_shot_prompt(question, examples=None):
 
     return prompt
 
-def create_instruct_prompt(question):
-    prompt = f"""Answer the question briefly and accurately.
-
-Question: {question}
-
-Answer:"""
-    return prompt
-
-def inference_base_model(model_path, data, fewshot=3, device='cuda', batch_size=1):
+def inference_base_model(model_path, data, fewshot=3, temperature=0.7, num_samples=1, device='cuda'):
     print(f"Loading base model from {model_path}")
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
@@ -43,36 +36,53 @@ def inference_base_model(model_path, data, fewshot=3, device='cuda', batch_size=
     )
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     tokenizer.pad_token = tokenizer.eos_token
-    
-    few_shot_examples = data[:fewshot]
-    
+
     results = []
-    
+
     for item in tqdm(data, desc="Base model inference"):
-        knowledge = item.get('knowledge') or item.get('support')
-        prompt = create_few_shot_prompt(
-            item['question'],
-            examples=few_shot_examples
-        )
-        
-        inputs = tokenizer(prompt, return_tensors="pt", padding=True).to(device)
-        
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=50,
-                temperature=0.1,
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id
+        # Collect multiple samples for the same question
+        samples = []
+
+        for sample_idx in range(num_samples):
+            # Randomly select few-shot examples for each sample
+            available_examples = [ex for ex in data if ex['question'] != item['question']]
+            if len(available_examples) >= fewshot:
+                few_shot_examples = random.sample(available_examples, fewshot)
+            else:
+                few_shot_examples = available_examples
+
+            prompt = create_few_shot_prompt(
+                item['question'],
+                examples=few_shot_examples
             )
-        
-        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        answer = generated_text[len(prompt):].strip()
-        
+
+            inputs = tokenizer(prompt, return_tensors="pt", padding=True).to(device)
+
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=30,
+                    temperature=temperature,
+                    do_sample=True,
+                    top_k=50,  # default value
+                    top_p=1.0,  # default value (effectively disabled)
+                    pad_token_id=tokenizer.pad_token_id
+                )
+
+            generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            answer = generated_text[len(prompt):].strip()
+
+            samples.append({
+                'model_answer': answer,
+                'prompt': prompt
+            })
+
+        # Create a single result for this item with all samples
         result = {
             'question': item['question'],
-            'model_answer': answer,
-            'prompt': prompt
+            'samples': samples,
+            'num_samples': num_samples,
+            'temperature': temperature
         }
 
         # Add fields if they exist in the original data
@@ -96,62 +106,9 @@ def inference_base_model(model_path, data, fewshot=3, device='cuda', batch_size=
             result['answer_idx'] = item['answer_idx']
 
         results.append(result)
-    
+
     return results
 
-def inference_instruct_model(model_path, data, device='cuda', batch_size=1):
-    print(f"Loading instruct model from {model_path}")
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        device_map='auto'
-    )
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    tokenizer.pad_token = tokenizer.eos_token
-    
-    results = []
-    
-    for item in tqdm(data, desc="Instruct model inference"):
-        prompt = create_instruct_prompt(item['question'])
-        
-        inputs = tokenizer(prompt, return_tensors="pt", padding=True).to(device)
-        
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=50,
-                temperature=0.1,
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id
-            )
-        
-        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        answer = generated_text[len(prompt):].strip()
-
-        result = {
-            'question': item['question'],
-            'model_answer': answer,
-            'prompt': prompt
-        }
-
-        # Add fields if they exist in the original data
-        if 'knowledge' in item:
-            result['knowledge'] = item['knowledge']
-        elif 'support' in item:
-            result['knowledge'] = item['support']
-
-        if 'right_answer' in item:
-            result['right_answer'] = item['right_answer']
-        elif 'correct_answer' in item:
-            result['right_answer'] = item['correct_answer']
-        elif 'answer' in item:
-            result['right_answer'] = item['answer']
-
-        if 'hallucinated_answer' in item:
-            result['hallucinated_answer'] = item['hallucinated_answer']
-
-        results.append(result)
-    
-    return results
 
 
 def save_results(results, output_path):
@@ -161,17 +118,16 @@ def save_results(results, output_path):
     print(f"Results saved to {output_path}")
 
 def main():
-    # python3 01_inference_models.py --dataname halueval
-    # python3 01_inference_models.py --dataname medqa
-    # python3 01_inference_models.py --dataname sciq
-    parser = argparse.ArgumentParser(description='Inference on train.jsonl using two models')
+    # python3 01_inference_models.py --dataname halueval --temperature 0.7 --num_samples 5
+    # python3 01_inference_models.py --dataname medqa --temperature 0.7 --num_samples 5
+    # python3 01_inference_models.py --dataname sciq --temperature 0.7 --num_samples 5
+    parser = argparse.ArgumentParser(description='Inference on train.jsonl using base model with sampling')
     parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa', 'sciq'], help='Dataset name (halueval, medqa, or sciq)')
     parser.add_argument('--base_model', type=str, default='../../model/Llama-3.2-3B', help='Path to base model')
-    parser.add_argument('--instruct_model', type=str, default='../../model/Llama-3.2-3B-Instruct', help='Path to instruct model')
-    parser.add_argument('--self_sft_model', type=str, default='../ref_model/Llama-3.2-3B-SFT', help='Path to instruct model')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use')
     parser.add_argument('--fewshot', type=int, default=3, help='The number of fewshot samples')
-    parser.add_argument('--model', type=str, choices=['base', 'instruct', 'self_sft', 'all'], default='all', help='Which model to run')
+    parser.add_argument('--temperature', type=float, default=0.7, help='Temperature for sampling (default: 0.7)')
+    parser.add_argument('--num_samples', type=int, default=1, help='Number of samples to generate per question (default: 1)')
 
     args = parser.parse_args()
 
@@ -185,27 +141,26 @@ def main():
     elif args.dataname == 'sciq':
         args.data_path = '../dataset/new_sft/sciq/train.jsonl'
         args.output_dir = './sciq'
-    
+
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    
+
     data = load_dataset(args.data_path)
     print(f"Loaded {len(data)} examples from {args.data_path}")
-    
-    if args.model in ['base', 'all']:
-        print("\n=== Running Base Model (Few-shot) ===")
-        base_results = inference_base_model(args.base_model, data, args.fewshot, device=args.device)
-        save_results(base_results, f"{args.output_dir}/base_model_results.jsonl")
-    
-    if args.model in ['instruct', 'all']:
-        print("\n=== Running Instruct Model ===")
-        instruct_results = inference_instruct_model(args.instruct_model, data, device=args.device)
-        save_results(instruct_results, f"{args.output_dir}/instruct_model_results.jsonl")
 
-    if args.model in ['self_sft', 'all']:
-        print("\n=== Running Self SFT Model ===")
-        sft_results = inference_instruct_model(args.self_sft_model, data, device=args.device)
-        save_results(sft_results, f"{args.output_dir}/self_sft_model_results.jsonl")
-    
+    print("\n=== Running Base Model (Few-shot with Sampling) ===")
+    print(f"Temperature: {args.temperature}, Num Samples: {args.num_samples}, Few-shot: {args.fewshot}")
+    base_results = inference_base_model(
+        args.base_model,
+        data,
+        fewshot=args.fewshot,
+        temperature=args.temperature,
+        num_samples=args.num_samples,
+        device=args.device
+    )
+
+    output_filename = f"base_model_temp{args.temperature}_samples{args.num_samples}_fewshot{args.fewshot}.jsonl"
+    save_results(base_results, f"{args.output_dir}/{output_filename}")
+
     print("\nInference completed!")
 
 if __name__ == "__main__":
