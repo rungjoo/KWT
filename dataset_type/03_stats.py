@@ -105,9 +105,11 @@ def main():
         description='Analyze statistics from answer check results',
         epilog='''
 Examples:
-  python3 03_stats.py --input_file halueval/base_model_temp0.7_samples5_fewshot3_evaluated_bertscore.json
-  python3 03_stats.py --input_file medqa/base_model_temp0.7_samples5_fewshot3_evaluated_rouge.json
-  python3 03_stats.py --input_file sciq/base_model_temp0.7_samples5_fewshot3_evaluated_bertscore.json
+python3 03_stats.py --input_file halueval/qwen2.5-3b/base_model_temp0.7_samples5_fewshot3_evaluated_rouge0.35.json
+  python3 03_stats.py --input_file sciq/qwen3-4b/base_model_temp0.7_samples5_fewshot3_evaluated_em.json
+  python3 03_stats.py --input_file halueval/qwen2.5-3b/base_model_temp0.7_samples5_fewshot3_evaluated_llm.json
+  python3 03_stats.py --input_file medqa/qwen3-4b/base_model_temp0.7_samples5_fewshot3_evaluated_bertscore.json
+  python3 03_stats.py --input_file sciq/qwen3-4b/base_model_temp0.7_samples5_fewshot3_evaluated_bertscore.json
         ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )

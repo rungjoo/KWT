@@ -1,0 +1,116 @@
+{
+  "eval_method": "llm",
+  "threshold": null,
+  "total": 11958,
+  "answerable": {
+    "total": 2337,
+    "correct": 634,
+    "skipped": 0,
+    "accuracy": 27.13,
+    "with_idk": {
+      "total": 1008,
+      "correct": 96,
+      "incorrect": 912,
+      "skipped": 0,
+      "accuracy": 9.52
+    },
+    "without_idk": {
+      "total": 1329,
+      "correct": 538,
+      "incorrect": 791,
+      "skipped": 0,
+      "accuracy": 40.48
+    }
+  },
+  "unanswerable": {
+    "total": 5283,
+    "idk_count": 3131,
+    "accuracy": 59.27
+  },
+  "dataset_stats": {
+    "NEC": {
+      "total": 4150,
+      "answerable": {
+        "total": 2072,
+        "correct": 0,
+        "skipped": 2072,
+        "accuracy": 0.0,
+        "with_idk": {
+          "total": 1476,
+          "correct": 0,
+          "incorrect": 0,
+          "skipped": 1476,
+          "accuracy": 0.0
+        },
+        "without_idk": {
+          "total": 596,
+          "correct": 0,
+          "incorrect": 0,
+          "skipped": 596,
+          "accuracy": 0.0
+        }
+      },
+      "unanswerable": {
+        "total": 2078,
+        "idk_count": 1529,
+        "accuracy": 73.58
+      }
+    },
+    "RefuNQ": {
+      "total": 4439,
+      "answerable": {
+        "total": 2266,
+        "correct": 438,
+        "skipped": 0,
+        "accuracy": 19.33,
+        "with_idk": {
+          "total": 1038,
+          "correct": 76,
+          "incorrect": 962,
+          "skipped": 0,
+          "accuracy": 7.32
+        },
+        "without_idk": {
+          "total": 1228,
+          "correct": 362,
+          "incorrect": 866,
+          "skipped": 0,
+          "accuracy": 29.48
+        }
+      },
+      "unanswerable": {
+        "total": 2173,
+        "idk_count": 1357,
+        "accuracy": 62.45
+      }
+    },
+    "selfAware": {
+      "total": 3369,
+      "answerable": {
+        "total": 2337,
+        "correct": 634,
+        "skipped": 0,
+        "accuracy": 27.13,
+        "with_idk": {
+          "total": 1008,
+          "correct": 96,
+          "incorrect": 912,
+          "skipped": 0,
+          "accuracy": 9.52
+        },
+        "without_idk": {
+          "total": 1329,
+          "correct": 538,
+          "incorrect": 791,
+          "skipped": 0,
+          "accuracy": 40.48
+        }
+      },
+      "unanswerable": {
+        "total": 1032,
+        "idk_count": 245,
+        "accuracy": 23.74
+      }
+    }
+  }
+}

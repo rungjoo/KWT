@@ -6,7 +6,6 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
 import os
 import re
-from bert_score import score as bert_score
 from rouge_score import rouge_scorer
 
 def load_model(model_path):
@@ -39,6 +38,10 @@ def evaluate_answer_llm(model, tokenizer, question, knowledge, right_answer, mod
     # First check for exact match after normalization
     right_answer_norm = normalize_text(right_answer)
     model_answer_norm = normalize_text(model_answer)
+
+    # Empty model answer should always be incorrect
+    if not model_answer_norm:
+        return 'incorrect', False, 0.0
 
     if right_answer_norm == model_answer_norm:
         return 'correct', True, 1.0
@@ -81,26 +84,14 @@ Answer only 'yes' or 'no':"""
     else:
         return 'incorrect', False, 0.0
 
-def evaluate_answer_bertscore(right_answer, model_answer, threshold=0.85):
-    """Use BERTScore to evaluate if model_answer matches right_answer"""
-    right_answer = normalize_text(right_answer)
-    model_answer = normalize_text(model_answer)
-
-    if right_answer == model_answer:
-        return 'correct', True, 1.0
-
-    # Calculate BERTScore with GPU support
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    P, R, F1 = bert_score([model_answer], [right_answer], lang='en', verbose=False, device=device)
-    f1_score = F1.item()
-
-    is_match = f1_score >= threshold
-    return 'correct' if is_match else 'incorrect', is_match, f1_score
-
 def evaluate_answer_rouge(right_answer, model_answer, threshold=0.5):
     """Use ROUGE score to evaluate if model_answer matches right_answer"""
     right_answer = normalize_text(right_answer)
     model_answer = normalize_text(model_answer)
+
+    # Empty model answer should always be incorrect
+    if not model_answer:
+        return 'incorrect', False, 0.0
 
     if right_answer == model_answer:
         return 'correct', True, 1.0
@@ -123,8 +114,8 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
         file_path: Path to the JSON or JSONL file
         model: Model for LLM evaluation (None if not using llm method)
         tokenizer: Tokenizer for LLM evaluation (None if not using llm method)
-        eval_method: Evaluation method ('llm', 'bertscore', 'rouge')
-        threshold: Threshold for bertscore/rouge (default: 0.7 for bertscore, 0.6 for rouge)
+        eval_method: Evaluation method ('llm', 'rouge', 'all')
+        threshold: Threshold for rouge (default: 0.6 for rouge)
     """
 
     print(f"\nProcessing file: {file_path}")
@@ -132,13 +123,11 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
 
     # Set default threshold based on method
     if threshold is None:
-        if eval_method == 'bertscore':
-            threshold = 0.7
-        elif eval_method == 'rouge':
+        if eval_method in ['rouge', 'all']:
             threshold = 0.6
 
-    if eval_method in ['bertscore', 'rouge'] and threshold is not None:
-        print(f"Threshold: {threshold}")
+    if eval_method in ['rouge', 'all'] and threshold is not None:
+        print(f"Threshold (Rouge): {threshold}")
 
     # Load data - support both JSONL and JSON formats
     data = []
@@ -199,6 +188,7 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
 
         # Remove <|end_of_text|> token from the answer
         cleaned_answer = filtered_model_answer.replace('<|end_of_text|>', '').strip()
+        cleaned_answer = cleaned_answer.replace('<|endoftext|>', '').strip()
 
         # Also remove <IDK> for comparison purposes
         answer_for_comparison = cleaned_answer.replace('<IDK>', '').strip()
@@ -221,10 +211,17 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
         # Evaluate based on selected method
         if eval_method == 'llm':
             eval_result, is_correct, score = evaluate_answer_llm(model, tokenizer, question, knowledge, right_answer, answer_for_comparison)
-        elif eval_method == 'bertscore':
-            eval_result, is_correct, score = evaluate_answer_bertscore(right_answer, answer_for_comparison, threshold)
         elif eval_method == 'rouge':
             eval_result, is_correct, score = evaluate_answer_rouge(right_answer, answer_for_comparison, threshold)
+        elif eval_method == 'all':
+            # Evaluate with both Rouge and LLM - both must agree
+            rouge_result, rouge_correct, rouge_score = evaluate_answer_rouge(right_answer, answer_for_comparison, threshold)
+            llm_result, llm_correct, llm_score = evaluate_answer_llm(model, tokenizer, question, knowledge, right_answer, answer_for_comparison)
+
+            # Both must be correct for final result to be correct
+            is_correct = rouge_correct and llm_correct
+            eval_result = 'correct' if is_correct else 'incorrect'
+            score = {'rouge': rouge_score, 'llm': llm_score, 'both_agree': is_correct}
         else:
             raise ValueError(f"Unknown evaluation method: {eval_method}")
 
@@ -264,7 +261,16 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
     accuracy = (correct / total * 100) if total > 0 else 0
     avoidance_rate = (avoided_hallucination / total * 100) if total > 0 else 0
     incorrect_rate = (incorrect / total * 100) if total > 0 else 0
-    avg_score = sum(scores) / len(scores) if scores else 0
+
+    # Calculate average score - handle dict scores for 'all' method
+    if eval_method == 'all':
+        avg_score = {
+            'rouge': sum(s['rouge'] for s in scores) / len(scores) if scores else 0,
+            'llm': sum(s['llm'] for s in scores) / len(scores) if scores else 0,
+            'both_agree_rate': sum(1 for s in scores if s['both_agree']) / len(scores) * 100 if scores else 0
+        }
+    else:
+        avg_score = sum(scores) / len(scores) if scores else 0
 
     # Count answers with IDK token
     idk_count = sum(1 for r in results if r.get('had_idk_token', False))
@@ -273,13 +279,18 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
     print(f"\n" + "="*60)
     print(f"Results Summary:")
     print(f"  Evaluation method: {eval_method}")
-    if eval_method in ['bertscore', 'rouge']:
-        print(f"  Threshold: {threshold}")
+    if eval_method in ['rouge', 'all']:
+        print(f"  Threshold (Rouge): {threshold}")
     print(f"  Total samples: {total}")
     print(f"\n  Overall:")
     print(f"    Correct answers: {correct} ({accuracy:.2f}%)")
     print(f"    Incorrect answers: {incorrect} ({incorrect_rate:.2f}%)")
-    print(f"    Average score: {avg_score:.4f}")
+    if eval_method == 'all':
+        print(f"    Average Rouge score: {avg_score['rouge']:.4f}")
+        print(f"    Average LLM score: {avg_score['llm']:.4f}")
+        print(f"    Both agree rate: {avg_score['both_agree_rate']:.2f}%")
+    else:
+        print(f"    Average score: {avg_score:.4f}")
     print(f"\n  Breakdown by <IDK> presence:")
     print(f"    Correct WITH <IDK>: {correct_with_idk} ({correct_with_idk/total*100:.2f}%)")
     print(f"    Correct WITHOUT <IDK>: {correct_without_idk} ({correct_without_idk/total*100:.2f}%)")
@@ -291,19 +302,20 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
     print("="*60)
 
     # Save detailed results
-    output_file = file_path.replace('.jsonl', f'_evaluated_{eval_method}.json')
+    threshold_str = str(threshold) if eval_method in ['rouge', 'all'] else ''
+    output_file = file_path.replace('.jsonl', f'_evaluated_{eval_method}{threshold_str}.json')
     if '.jsonl' not in file_path:
         # Handle both .json and other extensions
         base_name = file_path.rsplit('.', 1)[0]
         # Remove any existing _evaluated_* suffix
-        base_name = base_name.replace('_evaluated_rouge', '').replace('_evaluated_bertscore', '').replace('_evaluated_llm', '')
-        output_file = f'{base_name}_evaluated_{eval_method}.json'
+        base_name = base_name.replace('_evaluated_rouge', '').replace('_evaluated_llm', '').replace('_evaluated_all', '')
+        output_file = f'{base_name}_evaluated_{eval_method}{threshold_str}.json'
 
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump({
             'summary': {
                 'eval_method': eval_method,
-                'threshold': threshold if eval_method in ['bertscore', 'rouge'] else None,
+                'threshold': threshold if eval_method in ['rouge', 'all'] else None,
                 'total': total,
                 'correct': correct,
                 'incorrect': incorrect,
@@ -333,19 +345,21 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
 def main():
     # Example usage:
     # python3 02_halueval_answer_check.py --input_file halueval/llama_3.2-3b/sft.jsonl --eval_method llm
-    # python3 02_halueval_answer_check.py --input_file halueval/llama_3.2-3b/sample_weighted_idk0.1_evaluated_rouge.json --eval_method bertscore --threshold 0.7
-    # python3 02_halueval_answer_check.py --input_file halueval/llama_3.2-3b/sample_weighted_idk0.1.jsonl --eval_method rouge --threshold 0.6
+    # python3 02_halueval_answer_check.py --input_file sciq/llama_3.2-3b/base_model.jsonl --eval_method llm
+    # python3 02_halueval_answer_check.py --input_file sciq/llama_3.2-3b/instruct_idk.jsonl --eval_method llm
+    # python3 02_halueval_answer_check.py --input_file sciq/llama_3.2-3b/instruct_no_idk.jsonl --eval_method llm
+    # python3 02_halueval_answer_check.py --input_file halueval/llama_3.2-3b/seal.jsonl --eval_method all --threshold 0.6
     parser = argparse.ArgumentParser(description='Evaluate HaluEval model answers using various methods')
     parser.add_argument('--input_file', type=str, required=True,
                        help='Path to HaluEval JSON/JSONL file (e.g., halueval/llama_3.2-3b/base_model.jsonl)')
     parser.add_argument('--eval_method', type=str, default='llm',
-                       choices=['llm', 'bertscore', 'rouge'],
-                       help='Evaluation method: llm (default), bertscore, or rouge')
+                       choices=['llm', 'rouge', 'all'],
+                       help='Evaluation method: llm (default), rouge, or all (both Rouge and LLM must agree)')
     parser.add_argument('--model_path', type=str,
                        default='../../model/gemma-3-12b-it',
-                       help='Path to evaluation model (only needed for llm method)')
-    parser.add_argument('--threshold', type=float, default=None,
-                       help='Threshold for bertscore/rouge (default: 0.7 for bertscore, 0.6 for rouge)')
+                       help='Path to evaluation model (needed for llm and all methods)')
+    parser.add_argument('--threshold', type=str, default="",
+                       help='Threshold for rouge (default: 0.6 for rouge)')
 
     args = parser.parse_args()
 
@@ -353,11 +367,18 @@ def main():
     if not os.path.exists(args.input_file):
         print(f"Error: Input file '{args.input_file}' not found")
         return
+    
+    if args.eval_method == "llm":
+        args.threshold = ""
+    elif args.eval_method in ["rouge", "all"]:
+        args.threshold = float(args.threshold) if args.threshold else None
+    else:
+        args.threshold = None    
 
-    # Load model only if using LLM method
+    # Load model if using LLM or ALL method
     model = None
     tokenizer = None
-    if args.eval_method == 'llm':
+    if args.eval_method in ['llm', 'all']:
         model, tokenizer = load_model(args.model_path)
     else:
         print(f"Using {args.eval_method} method - no model loading required")

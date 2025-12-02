@@ -5,6 +5,7 @@ import math
 import copy, random
 import argparse
 import wandb
+from pathlib import Path
 from datasets import Dataset
 from transformers import (
     AutoModelForCausalLM,
@@ -17,12 +18,120 @@ from typing import Dict, List, Any
 import warnings
 warnings.filterwarnings("ignore")
 
+def get_model_name(model_path):
+    """Extract model name from model path for directory naming"""
+    return Path(model_path).name.lower()
+
 ######################################
 # 1) 데이터 로딩
 ######################################
-def load_data(filepath, sft_idk_weight=0.1):
+
+def calculate_sample_weight_noidk(samples_correct, samples_total, sft_idk_weight):
+    sample_weight = 1.0
+    loss_type = 'sft'
+    should_add_idk = False
+
+    return sample_weight, loss_type, should_add_idk
+
+def calculate_sample_weight_default(samples_correct, samples_total, sft_idk_weight):
+    """
+    Default sample weighting strategy.
+    Higher weight for harder questions (fewer correct samples).
+
+    Args:
+        samples_correct: Number of correct samples out of total
+        samples_total: Total number of samples
+        sft_idk_weight: Weight to use for IDK cases (samples_correct = 0)
+
+    Returns:
+        tuple: (sample_weight, loss_type, should_add_idk_token)
+            - sample_weight: Weight value for this sample
+            - loss_type: 'sft' or 'sft_idk'
+            - should_add_idk_token: Whether to append <IDK> to the response
+    """
+    if samples_correct > 0:
+        accuracy = samples_correct / samples_total
+        # ranges from 1.0 (1/5 correct) to 0.2 (5/5 correct)
+        sample_weight = 1.2 - accuracy
+        loss_type = 'sft'
+        should_add_idk = False
+    else:
+        sample_weight = sft_idk_weight
+        loss_type = "sft_idk"
+        should_add_idk = True
+
+    return sample_weight, loss_type, should_add_idk
+
+def calculate_sample_weight_reverse(samples_correct, samples_total, sft_idk_weight):
+    if samples_correct > 0:
+        accuracy = samples_correct / samples_total
+        # ranges from 1.0 (5/5 correct) to 0.2 (1/5 correct)
+        sample_weight = accuracy
+        loss_type = 'sft'
+        should_add_idk = False
+    else:
+        sample_weight = sft_idk_weight
+        loss_type = "sft_idk"
+        should_add_idk = True
+
+    return sample_weight, loss_type, should_add_idk
+
+def calculate_sample_weight_popular(samples_correct, samples_total, sft_idk_weight):
+    if samples_correct > 0:
+        sample_weight = 1.0
+        loss_type = 'sft'
+        should_add_idk = False
+    else:
+        return 0, 0, 0
+
+    return sample_weight, loss_type, should_add_idk
+
+def calculate_sample_weight_uniform(samples_correct, samples_total, sft_idk_weight):
+    if samples_correct > 0:
+        sample_weight = 1.0
+        loss_type = 'sft'
+        should_add_idk = False
+    else:
+        sample_weight = sft_idk_weight
+        loss_type = "sft_idk"
+        should_add_idk = True
+
+    return sample_weight, loss_type, should_add_idk
+
+# Dictionary mapping strategy names to functions
+SAMPLE_WEIGHT_STRATEGIES = {
+    'sft': calculate_sample_weight_noidk,
+    'sample_weighted': calculate_sample_weight_default,
+    'sample_uniform': calculate_sample_weight_uniform,
+    'rtuning_r': calculate_sample_weight_uniform,
+    'sample_weighted_reverse': calculate_sample_weight_reverse,
+    'sample_weighted_reverse_noinit': calculate_sample_weight_reverse,
+    'popular': calculate_sample_weight_popular
+}
+
+
+def load_data(filepath, sft_idk_weight=0.1, weight_strategy='default'):
+    """
+    Load and prepare training data with configurable sample weighting.
+
+    Args:
+        filepath: Path to the JSON file containing training data
+        sft_idk_weight: Weight for IDK cases (samples_correct = 0)
+        weight_strategy: Strategy for calculating sample weights. Options:
+            - 'default': Higher weight for harder questions (1.2 - accuracy)
+            - 'uniform': Equal weight for all samples (1.0)
+
+    Returns:
+        list: List of processed data items with weights
+    """
     with open(filepath, 'r', encoding='utf-8') as f:
         data = json.load(f)
+
+    # Get the weight calculation function
+    if weight_strategy not in SAMPLE_WEIGHT_STRATEGIES:
+        raise ValueError(f"Unknown weight_strategy: {weight_strategy}. Available: {list(SAMPLE_WEIGHT_STRATEGIES.keys())}")
+
+    weight_fn = SAMPLE_WEIGHT_STRATEGIES[weight_strategy]
 
     data_type = []
     for result in data['results']:
@@ -33,26 +142,25 @@ def load_data(filepath, sft_idk_weight=0.1):
         samples_correct = result.get('samples_correct', 0)
         samples_total = result.get('samples_total', 5)
 
-        # Calculate sample-based weight
-        # Higher weight for harder questions (fewer correct samples)
-        # samples_correct = 0 -> weight = 1.0 (hardest)
-        # samples_correct = 5 -> weight = 0.2 (easiest)
-        if samples_correct > 0:
-            accuracy = samples_correct / samples_total
-            sample_weight = 1.2 - accuracy  # ranges from 1.0 (0% correct) to 0.2 (100% correct)
-            loss_type = 'sft'
-            response = right_answer
-        else:
-            sample_weight = sft_idk_weight
-            loss_type = "sft_idk"
-            response = f"{right_answer} <IDK>"
+        # Calculate sample weight using the selected strategy
+        sample_weight, loss_type, should_add_idk = weight_fn(
+            samples_correct, samples_total, sft_idk_weight
+        )
 
-        item = {}
-        item['question'] = question
-        item['response'] = response
-        item['loss_type'] = loss_type
-        item['sample_weight'] = sample_weight
-        item['samples_correct'] = samples_correct
+        # Skip data with zero or negative weight (excluded from training)
+        if sample_weight <= 0:
+            continue
+
+        # Prepare response with or without <IDK> token
+        response = f"{right_answer} <IDK>" if should_add_idk else right_answer
+
+        item = {
+            'question': question,
+            'response': response,
+            'loss_type': loss_type,
+            'sample_weight': sample_weight,
+            'samples_correct': samples_correct,
+        }
 
         data_type.append(item)
 
@@ -201,6 +309,7 @@ class SampleWeightedTrainer(Trainer):
 
 
 def main(args):
+    # Determine weight strategy from save_run_name
     # Initialize wandb
     wandb_run_name = f"{args.dataname}_{args.save_run_name}-ep{args.epochs}_idk{args.sft_idk_weight}"
     wandb.init(
@@ -214,6 +323,7 @@ def main(args):
             "learning_rate": args.lr,
             "grad_accum": args.grad_accum,
             "sft_idk_weight": args.sft_idk_weight,
+            "weight_strategy": args.save_run_name,
             "max_length": args.max_length,
         }
     )
@@ -237,27 +347,29 @@ def main(args):
     # Resize model embeddings to accommodate new token
     model.resize_token_embeddings(len(tokenizer))
 
-    # Initialize <IDK> token embedding with average of "I don't know"
-    idk_text = "I don't know"
-    idk_tokens = tokenizer(idk_text, return_tensors="pt", add_special_tokens=False)
+    # sample_weighted_reverse_noinit 세팅에선 초기화 안함
+    if args.save_run_name != "sample_weighted_reverse_noinit":
+        # Initialize <IDK> token embedding with average of "I don't know"
+        idk_text = "I don't know"
+        idk_tokens = tokenizer(idk_text, return_tensors="pt", add_special_tokens=False)
 
-    with torch.no_grad():
-        # Get input embeddings
-        input_embeddings = model.get_input_embeddings()
+        with torch.no_grad():
+            # Get input embeddings
+            input_embeddings = model.get_input_embeddings()
 
-        # Get embeddings for "I don't know" tokens
-        idk_embeddings = input_embeddings(idk_tokens['input_ids'][0].to(model.device))
+            # Get embeddings for "I don't know" tokens
+            idk_embeddings = input_embeddings(idk_tokens['input_ids'][0].to(model.device))
 
-        # Calculate mean embedding
-        mean_embedding = idk_embeddings.mean(dim=0)
+            # Calculate mean embedding
+            mean_embedding = idk_embeddings.mean(dim=0)
 
-        # Get the token ID for <IDK>
-        idk_token_id = tokenizer.convert_tokens_to_ids(special_token)
+            # Get the token ID for <IDK>
+            idk_token_id = tokenizer.convert_tokens_to_ids(special_token)
 
-        # Initialize <IDK> token embedding with the mean
-        input_embeddings.weight[idk_token_id] = mean_embedding
+            # Initialize <IDK> token embedding with the mean
+            input_embeddings.weight[idk_token_id] = mean_embedding
 
-    print("Initialized <IDK> token embedding with average of 'I don't know'")
+        print("Initialized <IDK> token embedding with average of 'I don't know'")
 
     # Enable gradient checkpointing for memory efficiency
     model.gradient_checkpointing_enable()
@@ -266,7 +378,8 @@ def main(args):
 
     train_data_path = args.train_data_path
     print(f"Loading training data from {train_data_path}")
-    train_data = load_data(train_data_path, sft_idk_weight=args.sft_idk_weight)
+    print(f"Using weight strategy: {args.save_run_name}")
+    train_data = load_data(train_data_path, sft_idk_weight=args.sft_idk_weight, weight_strategy=args.save_run_name)
     print(f"Loaded {len(train_data)} training examples")
 
     train_tokenized = []
@@ -309,35 +422,50 @@ if __name__ == "__main__":
     # python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 0.1 --save_run_name sample_weighted --eval_method rouge --threshold 0.6
     # python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 0.1 --save_run_name sample_weighted --eval_method rouge --threshold 0.6
     # python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 0.1 --save_run_name sample_weighted --eval_method rouge --threshold 0.6
+
+    # python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 0.1 --save_run_name rtuning_r --eval_method rouge --threshold 0.6
+    # python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 0.1 --save_run_name rtuning_r --eval_method rouge --threshold 0.6
+    # python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 0.1 --save_run_name rtuning_r --eval_method rouge --threshold 0.6
     parser = argparse.ArgumentParser(description='Train model with sample-weighted SFT')
     parser.add_argument('--dataname', type=str, required=True, help='Dataset name (e.g., halueval, medqa)')
     parser.add_argument('--eval_method', type=str, default="rouge")
     parser.add_argument('--model_path', type=str, default="../../model/Llama-3.2-3B")
     parser.add_argument('--max_length', type=int, default=1024)
-    parser.add_argument('--threshold', type=float, default=None,
+    parser.add_argument('--threshold', type=str, default="None",
                        help='Threshold for bertscore/rouge (default: 0.7 for bertscore, 0.6 for rouge)')
 
-    parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--epochs', type=int, default=3)
     parser.add_argument('--batch_size', type=int, default=4)
     parser.add_argument('--grad_accum', type=int, default=8)
     parser.add_argument('--lr', type=float, default=2e-5)
 
     parser.add_argument('--logging_steps', type=int, default=10)
-    parser.add_argument('--save_steps', type=int, default=250)
 
     # Sample weight for IDK cases
     parser.add_argument('--sft_idk_weight', type=float, default=0.1, help='Weight for samples with no correct answers (IDK cases)')
 
     # Wandb configuration
     parser.add_argument('--wandb_project', type=str, default="hall-data-cur", help='WandB project name')
-    parser.add_argument('--save_run_name', type=str, default="sample_weighted", help='WandB run name (optional)')
+    parser.add_argument('--save_run_name', type=str, default="sample_weighted", help='WandB run name (optional)') # sample_weighted / sample_uniform / rtuning_r
 
     args = parser.parse_args()
 
     # Set train_data_path and output_dir based on dataname    
-    args.train_data_path = f"../dataset_type/{args.dataname}/base_model_temp0.7_samples5_fewshot3_evaluated_{args.eval_method}{args.threshold}.json"
-    # args.output_dir = f"./{args.dataname}/{args.save_run_name}/dpo{args.dpo_weight}_sft_idk{args.sft_idk_weight}"
-    args.output_dir = f"/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{args.save_run_name}/sw_{args.eval_method}_idk{args.sft_idk_weight}"
+    if args.eval_method in ["llm", "em"]:
+        args.threshold = ""
+    else:
+        args.threshold = float(args.threshold)
+
+    model_name = get_model_name(args.model_path)
+    if args.save_run_name == "rtuning_r":
+        args.train_data_path = f"../dataset_type/{args.dataname}/{model_name}/base_model_greedy_samples_fewshot3_evaluated_em.json"
+        args.output_dir = f"/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{model_name}/{args.save_run_name}/sw_{args.eval_method}{args.threshold}_idk{args.sft_idk_weight}"
+    elif args.save_run_name == "sft":
+        args.train_data_path = f"../dataset_type/{args.dataname}/{model_name}/base_model_temp0.7_samples5_fewshot3_evaluated_llm.json"
+        args.output_dir = f"/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{model_name}/{args.save_run_name}/sft"
+    else:
+        args.train_data_path = f"../dataset_type/{args.dataname}/{model_name}/base_model_temp0.7_samples5_fewshot3_evaluated_{args.eval_method}{args.threshold}.json"
+        args.output_dir = f"/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{model_name}/{args.save_run_name}/sw_{args.eval_method}{args.threshold}_idk{args.sft_idk_weight}"
 
     print(f"Dataset: {args.dataname}")
     print(f"Train data path: {args.train_data_path}")

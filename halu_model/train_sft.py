@@ -19,7 +19,7 @@ warnings.filterwarnings("ignore")
 ######################################
 # 1) 데이터 로딩 (SFT로만 사용)
 ######################################
-def load_data(filepath):    
+def load_data(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
@@ -27,15 +27,9 @@ def load_data(filepath):
     for result in data['results']:
         question = result['question']
         right_answer = result['right_answer']
-        base_answer = result['base_model']['filtered_model_answer']
-        self_sft_answer = result['self_sft_model']['filtered_model_answer']
 
         item = {}
         item['question'] = question
-
-        base_match = result['base_model']['match']
-        self_sft_match = result['self_sft_model']['match']
-
         item['response'] = right_answer
         data_type.append(item)
     return data_type
@@ -72,24 +66,6 @@ def preprocess_tokenize(item, tokenizer, max_length=1024):
     ex["input_ids"] = input_ids
     ex["labels"]    = labels
     return ex
-    
-# {'question': 'Hans Kammler was the last in Germany to be appointed to the paramilitary rank first created in what year?',
-#  'knowledge': ' As an SS officer, he was the last person in Nazi Germany to be appointed to the rank of "SS-Obergruppenführer".Obergruppenführer (] , "senior group leader") was a Nazi Party paramilitary rank that was first created in 1932 as a rank of the "Sturmabteilung" (SA), and adopted by the "Schutzstaffel" (SS) one year later.',
-#  'right_answer': '1932',
-#  'hallucinated_answer': 'Hans Kammler was the last person appointed to the Nazi Party paramilitary rank in 1933.',
-#  'base_model': {'model_answer': '1932\n\nQuestion: What sports complex was the 2014 MLS Cup match in California?\nAnswer: StubHub Center\n\nQuestion: For which number novel did the author of "The Secret History" win the Pulitzer Price for fiction?\nAnswer:',
-#   'filtered_model_answer': '1932',
-#   'evaluation': 'match',
-#   'match': True},
-#  'instruct_model': {'model_answer': '1933.\n\nExplanation: Hans Kammler was a German SS officer who was appointed to the rank of SS-Sturmbannführer in 1933, which was the highest rank in the SS at that time. The SS was a',
-#   'filtered_model_answer': '1933.',
-#   'evaluation': 'mismatch',
-#   'match': False},
-#  'self_sft_model': {'model_answer': '1933',
-#   'filtered_model_answer': '1933',
-#   'evaluation': 'mismatch',
-#   'match': False},
-#  'agreement': 'only_base_correct'}   
  
 ######################################
 # 3) Collator: 배치에서 SFT 데이터 패딩 (배치처리하면서 패딩하는 코드라 보면 되는 듯)
@@ -219,7 +195,8 @@ def main(args):
         warmup_ratio=0.03,
         weight_decay=0.01,
         logging_steps= args.logging_steps,
-        save_steps= args.save_steps,
+        # save_steps= args.save_steps,
+        save_strategy="no",
         save_total_limit=2,
         bf16=torch.cuda.is_available(),  # A100/H100면 bf16, 아니면 자동으로 fp32 사용
         remove_unused_columns=False,     # collator가 dict 구조를 유지하도록
@@ -242,8 +219,10 @@ if __name__ == "__main__":
     # python3 train_sft.py --dataname halueval --epochs 3 --save_steps 250 --save_run_name sft
     # python3 train_sft.py --dataname medqa --epochs 3 --save_steps 250 --save_run_name sft
     # python3 train_sft.py --dataname sciq --epochs 3 --save_steps 250 --save_run_name sft
-    parser = argparse.ArgumentParser(description='Evaluate model answers using LLM')
+    parser = argparse.ArgumentParser(description='Train model with SFT only')
     parser.add_argument('--dataname', type=str, required=True, help='Dataset name (e.g., halueval, medqa)')
+    parser.add_argument('--eval_method', type=str, default="rouge", help='Evaluation method (rouge or bertscore)')
+    parser.add_argument('--threshold', type=float, default=0.6, help='Threshold for evaluation method')
     parser.add_argument('--model_path', type=str, default="../../model/Llama-3.2-3B")
     parser.add_argument('--max_length', type=int, default=1024)
 
@@ -262,7 +241,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Set train_data_path and output_dir based on dataname
-    args.train_data_path = f"../dataset_type/{args.dataname}/merged/merged_evaluated.json"
+    args.train_data_path = f"../dataset_type/{args.dataname}/base_model_temp0.7_samples5_fewshot3_evaluated_{args.eval_method}{args.threshold}.json"
     args.output_dir = f"./{args.dataname}/{args.save_run_name}"
 
     print(f"Dataset: {args.dataname}")
