@@ -24,6 +24,9 @@ import re
 import random
 from rouge_score import rouge_scorer
 
+def get_model_name(model_path):
+    """Extract model name from model path for directory naming"""
+    return Path(model_path).name.lower()
 
 def load_nec_unanswerable(file_path: str) -> List[Dict[str, Any]]:
     """Load NEC unanswerable dataset (JSONL format)."""
@@ -805,6 +808,7 @@ def main():
     parser.add_argument('--instruct_method', type=str, default='idk', choices=['idk', 'no_idk', 'default'],
                        help='Instruct model method: idk (default), no_idk, or default')
     parser.add_argument('--fewshot', type=int, default=3, help='Number of few-shot examples for instruct model (default: 3)')
+    parser.add_argument('--base_model', type=str, default='llama-3.2-3b', help='base model name')
 
     args = parser.parse_args()
 
@@ -820,7 +824,7 @@ def main():
         args.threshold = float(args.threshold)        
 
     if args.model_type == 'trained':
-        args.model_path = f"/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{args.save_run_name}/sw_{args.data_eval_method}{args.data_threshold}_idk{args.sft_idk_weight}"
+        args.model_path = f"/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{args.base_model}/{args.save_run_name}/sw_{args.data_eval_method}{args.data_threshold}_idk{args.sft_idk_weight}"
     elif args.model_type == "instruct":
         args.model_path = '../../model/Llama-3.2-3B-Instruct'
     elif args.model_type == "seal":

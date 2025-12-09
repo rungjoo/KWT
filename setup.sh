@@ -17,7 +17,8 @@ conda activate $ENV_NAME
 # 3. 필요한 패키지 설치
 echo "[3/3] 패키지 설치"
 pip install --upgrade pip
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 pip install transformers accelerate safetensors
 pip install datasets
 pip install matplotlib

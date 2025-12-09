@@ -76,6 +76,62 @@ def calculate_sample_weight_reverse(samples_correct, samples_total, sft_idk_weig
 
     return sample_weight, loss_type, should_add_idk
 
+def calculate_sample_weight_reverse_smooth(samples_correct, samples_total, sft_idk_weight):
+    if samples_correct > 0:
+        # ranges from 2/6 (1/5 correct) to 6/6 (5/5 correct)
+        sample_weight = (samples_correct+1) / (samples_total+1)
+        loss_type = 'sft'
+        should_add_idk = False
+    else:
+        # ranges from 1/6 (0/5 correct)
+        sample_weight = (samples_correct+1) / (samples_total+1)
+        loss_type = "sft_idk"
+        should_add_idk = True
+
+    return sample_weight, loss_type, should_add_idk    
+
+def calculate_sample_weight_smooth(samples_correct, samples_total, sft_idk_weight):
+    if samples_correct > 0:
+        # ranges from 5/6 (1/5 correct) to 1/6 (5/5 correct)
+        sample_weight = 1 - (samples_correct) / (samples_total+1)
+        loss_type = 'sft'
+        should_add_idk = False
+    else:
+        # ranges from 1 (0/5 correct)
+        sample_weight = 1 - (samples_correct) / (samples_total+1)
+        loss_type = "sft_idk"
+        should_add_idk = True
+
+    return sample_weight, loss_type, should_add_idk    
+
+def calculate_sample_weight_reverse_idkonly(samples_correct, samples_total, sft_idk_weight):
+    if samples_correct > 0:
+        accuracy = samples_correct / samples_total
+        # ranges from 1.0 (5/5 correct) to 0.2 (1/5 correct)
+        sample_weight = accuracy
+        loss_type = 'sft'
+        should_add_idk = False
+    else:
+        sample_weight = sft_idk_weight
+        loss_type = "sft_idk"
+        should_add_idk = "idk_only"  # response will be just "<IDK>" without right_answer
+
+    return sample_weight, loss_type, should_add_idk
+
+def calculate_sample_weight_reverse_ridk(samples_correct, samples_total, sft_idk_weight):
+    if samples_correct > 0:
+        accuracy = samples_correct / samples_total
+        # ranges from 1.0 (5/5 correct) to 0.2 (1/5 correct)
+        sample_weight = accuracy
+        loss_type = 'sft'
+        should_add_idk = False
+    else:
+        sample_weight = sft_idk_weight
+        loss_type = "sft_idk"
+        should_add_idk = "ridk"  # response will be just "<IDK>" without right_answer
+
+    return sample_weight, loss_type, should_add_idk
+
 def calculate_sample_weight_popular(samples_correct, samples_total, sft_idk_weight):
     if samples_correct > 0:
         sample_weight = 1.0
@@ -106,6 +162,10 @@ SAMPLE_WEIGHT_STRATEGIES = {
     'rtuning_r': calculate_sample_weight_uniform,
     'sample_weighted_reverse': calculate_sample_weight_reverse,
     'sample_weighted_reverse_noinit': calculate_sample_weight_reverse,
+    'sample_weighted_reverse_idkonly': calculate_sample_weight_reverse_idkonly,
+    'sample_weighted_reverse_ridk': calculate_sample_weight_reverse_ridk,
+    'sample_weight_reverse_smooth': calculate_sample_weight_reverse_smooth,
+    'sample_weight_smooth': calculate_sample_weight_smooth,
     'popular': calculate_sample_weight_popular
 }
 
@@ -152,7 +212,14 @@ def load_data(filepath, sft_idk_weight=0.1, weight_strategy='default'):
             continue
 
         # Prepare response with or without <IDK> token
-        response = f"{right_answer} <IDK>" if should_add_idk else right_answer
+        if should_add_idk == "idk_only":
+            response = "<IDK>"
+        elif should_add_idk == "ridk":
+            response = f"<IDK> {right_answer}"
+        elif should_add_idk:
+            response = f"{right_answer} <IDK>"
+        else:
+            response = right_answer
 
         item = {
             'question': question,
@@ -422,10 +489,7 @@ if __name__ == "__main__":
     # python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 0.1 --save_run_name sample_weighted --eval_method rouge --threshold 0.6
     # python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 0.1 --save_run_name sample_weighted --eval_method rouge --threshold 0.6
     # python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 0.1 --save_run_name sample_weighted --eval_method rouge --threshold 0.6
-
-    # python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 0.1 --save_run_name rtuning_r --eval_method rouge --threshold 0.6
-    # python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 0.1 --save_run_name rtuning_r --eval_method rouge --threshold 0.6
-    # python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 0.1 --save_run_name rtuning_r --eval_method rouge --threshold 0.6
+    # python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 0.1 --save_run_name sample_weighted_reverse_idkonly --eval_method rouge --threshold 0.6
     parser = argparse.ArgumentParser(description='Train model with sample-weighted SFT')
     parser.add_argument('--dataname', type=str, required=True, help='Dataset name (e.g., halueval, medqa)')
     parser.add_argument('--eval_method', type=str, default="rouge")

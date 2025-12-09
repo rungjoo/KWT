@@ -1,11 +1,14 @@
-python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 1.0 --save_run_name sft --eval_method llm --model_path ../../model/Llama-3.2-3B
-python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 0.2 --save_run_name sample_weighted_reverse --eval_method llm --model_path ../../model/Llama-3.2-3B
+# python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 0.16 --save_run_name sample_weight_reverse_smooth --eval_method llm --model_path ../../model/Llama-3.2-3B
+# python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 0.16 --save_run_name sample_weight_reverse_smooth --eval_method llm --model_path ../../model/Llama-3.2-3B
+# python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 0.16 --save_run_name sample_weight_reverse_smooth --eval_method llm --model_path ../../model/Llama-3.2-3B
 
-python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 1.0 --save_run_name sft --eval_method llm --model_path ../../model/Llama-3.2-3B
-python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 0.2 --save_run_name sample_weighted_reverse --eval_method llm --model_path ../../model/Llama-3.2-3B
+python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 0.16 --save_run_name sample_weight_reverse_smooth --eval_method rouge --threshold 0.35 --model_path ../../model/Llama-3.2-3B
+python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 0.16 --save_run_name sample_weight_reverse_smooth --eval_method rouge --threshold 0.6 --model_path ../../model/Llama-3.2-3B
+python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 0.16 --save_run_name sample_weight_reverse_smooth --eval_method rouge --threshold 0.6 --model_path ../../model/Llama-3.2-3B
 
-python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 1.0 --save_run_name sft --eval_method llm --model_path ../../model/Llama-3.2-3B
-python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 0.2 --save_run_name sample_weighted_reverse --eval_method llm --model_path ../../model/Llama-3.2-3B
+python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 0.16 --save_run_name sample_weight_reverse_smooth --eval_method em --model_path ../../model/Llama-3.2-3B
+python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 0.16 --save_run_name sample_weight_reverse_smooth --eval_method em --model_path ../../model/Llama-3.2-3B
+python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 0.16 --save_run_name sample_weight_reverse_smooth --eval_method em --model_path ../../model/Llama-3.2-3B
 
 # python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 1.0 --save_run_name sft --eval_method llm --model_path ../../model/Qwen2.5-3B
 # python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 1.0 --save_run_name sft --eval_method llm --model_path ../../model/Qwen2.5-3B
