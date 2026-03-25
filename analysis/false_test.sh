@@ -1,3 +1,0 @@
-python3 05_evaluate_idk.py --dataset all --dataname halueval --save_run_name sample_weighted --sft_idk_weight 0.1 --eval_method rouge --threshold 0.6
-python3 05_evaluate_idk.py --dataset all --dataname medqa --save_run_name sample_weighted --sft_idk_weight 0.1 --eval_method rouge --threshold 0.6
-python3 05_evaluate_idk.py --dataset all --dataname sciq --save_run_name sample_weighted --sft_idk_weight 0.1 --eval_method rouge --threshold 0.6

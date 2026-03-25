@@ -1,3 +1,0 @@
-python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 1.0 --save_run_name sample_weight_smooth --eval_method llm --model_path ../../model/Llama-3.2-3B
-python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 1.0 --save_run_name sample_weight_smooth --eval_method llm --model_path ../../model/Llama-3.2-3B
-python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 1.0 --save_run_name sample_weight_smooth --eval_method llm --model_path ../../model/Llama-3.2-3B

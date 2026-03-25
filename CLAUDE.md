@@ -4,73 +4,73 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a hallucination detection training and evaluation framework for Large Language Models (LLMs). The project focuses on training SFT (Supervised Fine-Tuning) models and evaluating their ability to provide accurate answers without hallucinating, using QA datasets like SQuAD and TriviaQA.
+This is a hallucination detection training and evaluation framework for Large Language Models (LLMs). The project focuses on training SFT (Supervised Fine-Tuning) models and evaluating their ability to provide accurate answers without hallucinating, using QA datasets like HaluEval, MedQA, and SciQ.
+
+## Project Structure
+
+```
+hall/
+├── dataset/           # Dataset preparation and raw data
+├── training/          # Model training scripts
+│   ├── train_sft.py           # Standard SFT training
+│   ├── train_weighted.py      # Weighted sample training with IDK
+│   ├── train_weighted_noidk.py # Weighted training without IDK
+│   └── train_seal.py          # SEAL method training
+├── inference/         # Model inference and evaluation
+│   ├── run_inference.py       # Run model inference
+│   ├── check_answers.py       # LLM-based answer checking
+│   ├── compute_stats.py       # Compute statistics
+│   └── compare_*.py           # Comparison scripts
+├── analysis/          # Result analysis and visualization
+│   ├── evaluate_results.py    # Evaluate model results
+│   ├── evaluate_advanced.py   # Advanced evaluation metrics
+│   ├── evaluate_idk.py        # IDK response evaluation
+│   ├── compute_tauc.py        # Compute TAUC metric
+│   └── compute_kl_divergence.py # KL divergence analysis
+└── CLAUDE.md
+```
 
 ## Key Commands
 
-### Data Preparation
-```bash
-# Download SQuAD and TriviaQA datasets
-python dataset/download_datasets.py
-
-# Convert datasets to JSONL format
-python dataset/convert_to_json.py
-
-# Prepare merged training data from both datasets
-python dataset/prepare_training_data.py
-```
-
 ### Model Training
 ```bash
-# Train Llama SFT model on prepared data
-python model/train_llama_sft.py
+# Train weighted sample model
+python training/train_weighted.py --model_path MODEL --dataset halueval
+
+# Train SFT model
+python training/train_sft.py --model_path MODEL
 ```
 
-### Model Inference and Evaluation
+### Model Inference
 ```bash
-# Run inference on models (base, instruct, SFT)
-python inference_models.py --model_type [base|instruct|sft] --model_path PATH --data_path PATH
-
-# Evaluate model answers using LLM judge
-python answer_check.py --input_file dataset_llama_3.2-3b/MODEL_results.jsonl --model_path PATH_TO_JUDGE_MODEL
-
-# Merge and analyze evaluation results from multiple models
-python merge_evaluated_results.py
+# Run inference
+python inference/run_inference.py --model_path MODEL --data_path DATA
 ```
 
-## High-Level Architecture
+### Evaluation
+```bash
+# Evaluate model answers
+python analysis/evaluate_results.py --input_file RESULTS.jsonl
 
-### Data Pipeline
-1. **Dataset Download**: Downloads SQuAD and TriviaQA datasets using HuggingFace datasets library
-2. **Format Conversion**: Converts datasets to JSONL format with question-answer pairs
-3. **Data Merging**: Combines both datasets into unified training/validation sets
+# Evaluate IDK responses
+python analysis/evaluate_idk.py --input_file RESULTS.jsonl
+```
 
-### Model Training Flow
-1. **Base Model**: Starting point (e.g., Llama-3.2-3B)
-2. **SFT Training**: Fine-tunes base model on merged QA data using supervised learning
-3. **Model Checkpointing**: Saves trained models with tokenizers and configs
+## Key Components
 
-### Evaluation Pipeline
-1. **Inference**: Generates answers from different model variants (base, instruct, SFT)
-2. **Answer Checking**: Uses an LLM judge to evaluate semantic equivalence between model answers and ground truth
-3. **Results Merging**: Aggregates and compares performance across models
+- **training/**: Model training scripts
+  - `train_weighted.py`: Main training script with sample weighting
+  - `train_sft.py`: Standard supervised fine-tuning
 
-### Key Components
+- **inference/**: Inference and answer evaluation
+  - `run_inference.py`: Generate model answers
+  - `check_answers.py`: LLM-based answer verification
 
-- **dataset/**: Contains data preparation scripts and downloaded datasets
-  - Raw datasets stored in subdirectories (squad/, trivia_qa/)
-  - Merged training data (merged_train.jsonl, merged_val.jsonl)
+- **analysis/**: Result analysis
+  - `evaluate_results.py`: Main evaluation script
+  - `compute_tauc.py`: TAUC (Truthful AUC) computation
 
-- **model/**: Training scripts and saved model checkpoints
-  - Llama-3.2-3B-SFT/: Fine-tuned model checkpoints
-
-- **dataset_llama_3.2-3b/**: Inference results and evaluations
-  - base_model_results.jsonl: Base model outputs
-  - instruct_model_results.jsonl: Instruction-tuned model outputs
-  - self_sft_model_results.jsonl: SFT model outputs
-  - *_evaluated.json: LLM-judged evaluation results
-
-### Evaluation Strategy
+## Evaluation Strategy
 
 The project uses a two-stage evaluation:
 1. Direct text matching (normalized)

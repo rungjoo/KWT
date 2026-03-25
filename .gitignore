@@ -1,38 +1,109 @@
-# Model directories
+# ===========================================
+# Model & Checkpoint directories
+# ===========================================
 model/
-halu_model/checkpoints/
-halu_model/wandb/
+ref_model/
+training/halueval/
+training/medqa/
+training/sciq/
+training/checkpoints/
 
-# Log files
-*.log
+# ===========================================
+# Wandb logs
+# ===========================================
+wandb/
+**/wandb/
 
-# Jupyter Notebook checkpoints
-.ipynb_checkpoints/
-*.ipynb_checkpoints
-
-# Python cache
-__pycache__/
-*.py[cod]
-*$py.class
-
+# ===========================================
 # Large dataset files
+# ===========================================
 dataset/squad/
 dataset/trivia_qa/
 dataset/merged*.jsonl
 dataset/ref_sft/
-dataset/new_sft/halueval/
-dataset/new_sft/medqa/
+dataset/halueval/
+dataset/medqa/
 dataset/sciq/
 *.arrow
-dataset/**/*.jsonl
-halu_model/**/*.jsonl
 
-# Large result files from dataset_type
-dataset_type/**/*.jsonl
-dataset_type/**/*_evaluated*.json
+# ===========================================
+# Result files (jsonl, json)
+# ===========================================
+**/*.jsonl
+**/*_evaluated*.json
+*_prob.jsonl
 
-# Model checkpoints
-halu_model/halueval/
-halu_model/medqa/
-halu_model/sciq/
-ref_model/
+# ===========================================
+# Analysis result directories
+# ===========================================
+analysis/halueval/
+analysis/medqa/
+analysis/sciq/
+analysis/ood_evaluation/
+analysis/pre_exp/
+analysis/idk_prob_visualization/
+analysis/kl_divergence/
+analysis/TAUC/
+analysis/idk_test_case/
+
+# ===========================================
+# Inference result directories
+# ===========================================
+inference/halueval/
+inference/medqa/
+inference/sciq/
+inference/NEC/
+inference/RefuNQ/
+inference/selfAware/
+
+# ===========================================
+# Temporary scripts
+# ===========================================
+**/test*.sh
+**/infer*.sh
+**/train*.sh
+answer.sh
+
+# ===========================================
+# Log files
+# ===========================================
+*.log
+logs/
+
+# ===========================================
+# Jupyter Notebook
+# ===========================================
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+*.ipynb
+
+# ===========================================
+# Python cache
+# ===========================================
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# ===========================================
+# IDE & Editor
+# ===========================================
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+
+# ===========================================
+# OS files
+# ===========================================
+.DS_Store
+Thumbs.db
+
+# ===========================================
+# Misc
+# ===========================================
+*.pdf
+setup.sh
