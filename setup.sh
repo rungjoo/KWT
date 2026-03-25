@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Conda 초기화 (bash setup.sh로 실행할 때 필요)
+export PATH="$HOME/miniforge3/bin:$PATH"
+
 # 1. Conda 가상환경 생성
 ENV_NAME=hugging
 PYTHON_VERSION=3.10
