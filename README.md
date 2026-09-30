@@ -95,10 +95,13 @@ See [dataset/README.md](dataset/README.md). HaluEval ([Li et al., 2023](https://
 ## Citation
 
 ```bibtex
-@article{lee2026kwt,
-  title   = {What Models Know, How Well They Know It: Knowledge-Weighted Fine-Tuning for Learning When to Say "I Don't Know"},
-  author  = {Lee, Joosung and Jo, Hwiyeol and Ko, Donghyeon and Chae, Kyubyung and Park, Cheonbok and Kim, Jeonghoon},
-  journal = {arXiv preprint arXiv:2604.05779},
-  year    = {2026}
+@misc{lee2026modelsknowknowit,
+      title={What Models Know, How Well They Know It: Knowledge-Weighted Fine-Tuning for Learning When to Say "I Don't Know"}, 
+      author={Joosung Lee and Hwiyeol Jo and Donghyeon Ko and Kyubyung Chae and Cheonbok Park and Jeonghoon Kim},
+      year={2026},
+      eprint={2604.05779},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2604.05779}, 
 }
 ```
