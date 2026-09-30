@@ -1,106 +1,67 @@
-# Analysis
+# Analysis: Evaluation and Analyses
 
-Scripts for model evaluation and result analysis.
+`run.sh` runs every evaluation in the paper.
 
-## Files
-
-### Evaluation Scripts
 | File | Description |
-|------|-------------|
-| `evaluate_results.py` | Basic model evaluation (accuracy, IDK ratio) |
-| `evaluate_advanced.py` | Advanced evaluation (sampling-based analysis) |
-| `evaluate_idk.py` | IDK response evaluation (NEC, RefuNQ, etc.) |
-| `evaluate_ood.py` | OOD dataset evaluation (RefuNQ, SelfAware) |
-| `check_answers.py` | LLM-based answer checking |
+|---|---|
+| `evaluate_results.py` | Generates answers on the in-domain test set with a fine-tuned checkpoint (`--method knowledge` for Table 10) |
+| `check_answers.py` | Judges the generations (LLM-as-a-judge after removing `<IDK>`) and records `<IDK>` usage |
+| `compute_metrics.py` | Accuracy, nAUPC, A-FPR, IDK Precision, IDK Recall (in-domain), and OOD IDK rates / IDK Score |
+| `evaluate_ood.py` | Inference and judging on NEC / RefuNQ / SelfAware (Tables 7, 8, 13) |
+| `compute_kl_divergence.py` | Token-level KL(base ‖ fine-tuned) on gold responses (Table 12) |
+| `analyze_by_knowledge.py` | SFT vs. KWT and `<IDK>` rate grouped by the base model's knowledge score (Figure 1) |
+| `run_idk_prob.py` | Test-set inference that stores the `<IDK>` probability at every decoding step |
+| `visualize_idk_prob.py` | Plots `<IDK>` probability over response positions (Figures 2, 3) |
 
-### Analysis Scripts
-| File | Description |
-|------|-------------|
-| `compute_tauc.py` | Compute TAUC (Truthful AUC) metric |
-| `compute_kl_divergence.py` | KL divergence analysis with base model |
-| `compare_models.py` | Compare KWT/SFT/Base model performance |
-| `visualize_idk_prob.py` | Visualize IDK probability sequences |
-| `extract_idk_correct.py` | Extract cases correctly handled by IDK |
+## In-domain evaluation
 
-## Execution Order
+Use the same `--save_run_name / --data_eval_method / --sft_idk_weight` as in training. The checkpoint path is resolved automatically, or can be given with `--model_path`.
 
-### Basic Evaluation Flow
-```
-1. evaluate_results.py    → Basic accuracy evaluation
-2. compute_tauc.py        → Compute TAUC metric
-3. compare_models.py      → Model comparison (optional)
-```
-
-### IDK Analysis Flow
-```
-1. evaluate_idk.py        → Evaluate IDK responses
-2. compute_kl_divergence.py → KL divergence analysis
-3. visualize_idk_prob.py  → Visualization (optional)
-```
-
-## Usage
-
-### 1. Basic Evaluation
 ```bash
-python evaluate_results.py \
-    --model_path /path/to/model \
-    --dataname halueval \
-    --result_file results.jsonl
+cd analysis
+python evaluate_results.py --dataname halueval --save_run_name sample_weight_reverse_smooth --data_eval_method llm --sft_idk_weight 0.16
+#   -> halueval/llama-3.2-3b/sample_weight_reverse_smooth_llm_idk0.16.jsonl
+python check_answers.py --input_file halueval/llama-3.2-3b/sample_weight_reverse_smooth_llm_idk0.16.jsonl
+#   -> ..._evaluated_llm.json
+python compute_metrics.py halueval/llama-3.2-3b/*_evaluated_llm.json
+python compute_metrics.py --idk_as_incorrect halueval/llama-3.2-3b/seal_evaluated_llm.json   # SEAL / only-IDK
 ```
 
-### 2. Compute TAUC
+Result file names are `<run_name>_<eval_method><threshold>_idk<w>.jsonl`, except `sft_llm_idk0.0.jsonl` and `seal.jsonl`.
+
+## Out-of-domain evaluation
+
 ```bash
-python compute_tauc.py \
-    --input_file evaluated_results.json \
-    --alpha_max 1.0
+python evaluate_ood.py --dataname halueval --save_run_name sample_weight_reverse_smooth --data_eval_method llm
+#   -> ood_evaluation/sample_weight_reverse_smooth_sw_llm_idk0.16_halueval_idk_results_llm.jsonl
+python compute_metrics.py --ood_dataset RefuNQ ood_evaluation/*_halueval_idk_results_llm.jsonl
 ```
 
-**TAUC**: Metric measuring the trade-off between accuracy and IDK ratio
+With `--ood_dataset`:
+- nAUPC / A-FPR / IDK Precision are computed on the answerable questions of that dataset (Table 7).
+- `IR_ans`, `IR_unans` and the IDK Score (Table 13) use both the answerable and the unanswerable questions.
 
-### 3. KL Divergence Analysis
+## Analyses
+
 ```bash
-python compute_kl_divergence.py \
-    --dataname halueval \
-    --our_model_name sample_weight_reverse_smooth_llm_idk0.16
+python analyze_by_knowledge.py --dataset halueval       # needs inference/<ds>/<model>/test/..._evaluated_llm.json
+python compute_kl_divergence.py --dataname halueval                           # Base vs SFT, Base vs KWT
+python compute_kl_divergence.py --dataname halueval --save_run_name seal      # Base vs SFT, Base vs SEAL
+python run_idk_prob.py --dataname halueval --save_run_name sample_weighted_reverse_ridk
+python visualize_idk_prob.py --run_stem sample_weighted_reverse_ridk_llm_idk0.16
 ```
 
-Analyzes distribution difference with base model during IDK responses.
+## Metrics
 
-### 4. Model Comparison
-```bash
-python compare_models.py \
-    --kwt_file kwt_results.jsonl \
-    --sft_file sft_results.jsonl \
-    --base_file base_results.jsonl
-```
+|  | Correct | Incorrect |
+|---|---|---|
+| Response w/ `<IDK>` | A | B |
+| Response w/o `<IDK>` | C | D |
 
-### 5. OOD Evaluation
-```bash
-python evaluate_ood.py \
-    --model_path /path/to/model \
-    --dataset refunq
-```
-
-Supported datasets: RefuNQ, SelfAware
-
-### 6. IDK Probability Visualization
-```bash
-python visualize_idk_prob.py \
-    --input_file results_with_prob.jsonl \
-    --output_dir figures/
-```
-
-## Output
-
-### Evaluation Results
-- `{dataname}/{model}/results_evaluated.json`: Evaluated results
-- `TAUC/{dataname}_tauc.json`: TAUC scores
-- `kl_divergence/{dataname}/kl_analysis_{model}.json`: KL analysis results
-
-### Key Metrics
-| Metric | Description |
-|--------|-------------|
-| Accuracy | Correctness rate |
-| IDK Ratio | Ratio of IDK responses |
-| TAUC | Truthful AUC (accuracy-IDK trade-off) |
-| KL Divergence | Distribution difference from base model |
+- Accuracy = (A+C)/(A+B+C+D)
+- UA-Acc(α) = (αB+C)/(A+B+C+D)
+- CA-Acc(α) = (C−αA)/(A+B+C+D)
+- nAUPC = (1/α_max) ∫₀^α_max UA-Acc(α)·CA-Acc(α) dα, with α_max = 1 and percentage-scaled values
+- A-FPR = A/(A+C)
+- IDK Precision = B/(A+B)
+- IDK Recall = B/(B+D)

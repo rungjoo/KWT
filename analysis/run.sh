@@ -1,99 +1,93 @@
 #!/bin/bash
 # =============================================================================
-# Analysis Scripts - All Evaluation Commands
+# Step 3. Evaluation and analysis (paper Sec. 4-5)
 # =============================================================================
-# Usage: Uncomment the commands you want to run
-
-# Base model path
-BASE_MODEL="../../model/Llama-3.2-3B"
-# BASE_MODEL="../../model/Qwen2.5-3B"
-
+# Requires the checkpoints from training/run.sh.
+#
+# Usage:  bash analysis/run.sh
+#         BASE_MODEL=Qwen/Qwen2.5-3B bash analysis/run.sh
 # =============================================================================
-# 1. Basic Evaluation (evaluate_results.py)
-# =============================================================================
-# Evaluates trained model on test set
+set -e
+cd "$(dirname "$0")"
 
-# HaluEval
-# python evaluate_results.py --dataname halueval --save_run_name sample_weight_reverse_smooth --sft_idk_weight 0.16 --data_eval_method llm --base_model $BASE_MODEL
+BASE_MODEL=${BASE_MODEL:-meta-llama/Llama-3.2-3B}
+JUDGE_MODEL=${JUDGE_MODEL:-google/gemma-3-12b-it}
+MODEL_NAME=$(basename "$BASE_MODEL" | tr '[:upper:]' '[:lower:]')
 
-# MedQA
-# python evaluate_results.py --dataname medqa --save_run_name sample_weight_reverse_smooth --sft_idk_weight 0.16 --data_eval_method llm --base_model $BASE_MODEL
+# <save_run_name> <data_eval_method> <sft_idk_weight>  (must match training/run.sh)
+RUNS=(
+    "sample_weight_reverse_smooth llm 0.16"        # KWT (LLM)
+    "sample_weight_reverse_smooth rouge 0.16"      # KWT (Rouge)
+    "sample_weight_reverse_smooth em 0.16"         # KWT (EM)
+    "sft llm 0.0"                                  # SFT
+    "popular llm 0.0"                              # FT-TOP
+    "rtuning_r em 1.0"                             # R-Tuning
+    "seal llm 0.16"                                # SEAL
+    "sample_weight_smooth llm 1.0"                 # KWT-RF
+    "sample_uniform llm 1.0"                       # KWT-U
+    "sample_weighted_reverse_ridk llm 0.16"        # KWT (prepend-IDK)
+    "sample_weighted_reverse_idkonly llm 0.16"     # KWT (only-IDK)
+    "sample_weight_reverse_smooth_noidk llm 0.16"  # KWT (non-IDK)
+)
 
-# SciQ
-# python evaluate_results.py --dataname sciq --save_run_name sample_weight_reverse_smooth --sft_idk_weight 0.16 --data_eval_method llm --base_model $BASE_MODEL
+# -----------------------------------------------------------------------------
+# In-domain: generate -> judge -> metrics (Tables 5, 6, 8, 9, 11, 14, 15, 16)
+# -----------------------------------------------------------------------------
+for DS in halueval medqa sciq; do
+    for R in "${RUNS[@]}"; do
+        read -r NAME METHOD W <<< "$R"
+        python evaluate_results.py --dataname $DS --base_model $BASE_MODEL \
+            --save_run_name $NAME --data_eval_method $METHOD --sft_idk_weight $W
+    done
 
-# =============================================================================
-# 2. Answer Checking (check_answers.py)
-# =============================================================================
-# LLM-based answer correctness evaluation
+    # Table 10: external knowledge in the prompt (datasets that provide it)
+    if [[ $DS != medqa ]]; then
+        python evaluate_results.py --dataname $DS --base_model $BASE_MODEL --method knowledge
+    fi
 
-# python check_answers.py --input_file halueval/llama-3.2-3b/sample_weight_reverse_smooth_llm_idk0.16.jsonl --eval_method llm
-# python check_answers.py --input_file medqa/llama-3.2-3b/sample_weight_reverse_smooth_llm_idk0.16.jsonl --eval_method llm
-# python check_answers.py --input_file sciq/llama-3.2-3b/sample_weight_reverse_smooth_llm_idk0.16.jsonl --eval_method llm
+    # Judge every generation that has not been judged yet
+    for F in $DS/$MODEL_NAME/*.jsonl; do
+        [[ $F == *_prob.jsonl ]] && continue
+        [[ -f ${F%.jsonl}_evaluated_llm.json ]] || python check_answers.py --input_file $F --model_path $JUDGE_MODEL
+    done
 
-# =============================================================================
-# 3. Advanced Evaluation (evaluate_advanced.py)
-# =============================================================================
-# Sampling-based evaluation with multiple runs
+    echo "=== $DS ==="
+    python compute_metrics.py $DS/$MODEL_NAME/*_evaluated_llm.json
+    # SEAL / only-IDK count every <IDK> response as incorrect (Tables 8, 16)
+    python compute_metrics.py --idk_as_incorrect \
+        $DS/$MODEL_NAME/seal_evaluated_llm.json \
+        $DS/$MODEL_NAME/sample_weighted_reverse_idkonly_llm_idk0.16_evaluated_llm.json
+done
 
-# python evaluate_advanced.py --dataname halueval --save_run_name sample_weight_reverse_smooth --sft_idk_weight 0.16 --base_model $BASE_MODEL
-# python evaluate_advanced.py --dataname medqa --save_run_name sample_weight_reverse_smooth --sft_idk_weight 0.16 --base_model $BASE_MODEL
-# python evaluate_advanced.py --dataname sciq --save_run_name sample_weight_reverse_smooth --sft_idk_weight 0.16 --base_model $BASE_MODEL
+# -----------------------------------------------------------------------------
+# Out-of-domain: NEC / RefuNQ / SelfAware with HaluEval-trained models (Tables 7, 8, 13)
+# -----------------------------------------------------------------------------
+for R in "sample_weight_reverse_smooth llm 0.16" "sample_weight_reverse_smooth rouge 0.16" \
+         "sample_weight_reverse_smooth em 0.16" "rtuning_r em 1.0" "seal llm 0.16"; do
+    read -r NAME METHOD W <<< "$R"
+    python evaluate_ood.py --dataname halueval --base_model $BASE_MODEL --judge_model_path $JUDGE_MODEL \
+        --save_run_name $NAME --data_eval_method $METHOD --sft_idk_weight $W
+done
+for OOD in RefuNQ selfAware NEC; do
+    echo "=== $OOD ==="
+    python compute_metrics.py --ood_dataset $OOD ood_evaluation/*_halueval_idk_results_llm.jsonl
+    python compute_metrics.py --ood_dataset $OOD --idk_as_incorrect ood_evaluation/seal_halueval_idk_results_llm.jsonl
+done
 
-# =============================================================================
-# 4. IDK Evaluation (evaluate_idk.py)
-# =============================================================================
-# Evaluate IDK response quality on NEC/RefuNQ datasets
+# -----------------------------------------------------------------------------
+# Analysis
+# -----------------------------------------------------------------------------
+for DS in halueval medqa sciq; do
+    # Figure 1: <IDK> rate by the base model's knowledge score on the test set
+    python analyze_by_knowledge.py --dataset $DS --model_name $MODEL_NAME
 
-# python evaluate_idk.py --model_path /path/to/model --dataset nec
-# python evaluate_idk.py --model_path /path/to/model --dataset refunq
+    # Table 12: token-level KL divergence to the base model (SFT vs. KWT, SFT vs. SEAL)
+    python compute_kl_divergence.py --dataname $DS --base_model $BASE_MODEL
+    python compute_kl_divergence.py --dataname $DS --base_model $BASE_MODEL --save_run_name seal
 
-# =============================================================================
-# 5. OOD Evaluation (evaluate_ood.py)
-# =============================================================================
-# Evaluate on out-of-distribution datasets
-
-# python evaluate_ood.py --model_path /path/to/model --dataset refunq
-# python evaluate_ood.py --model_path /path/to/model --dataset selfaware
-
-# =============================================================================
-# 6. TAUC Computation (compute_tauc.py)
-# =============================================================================
-# Compute Truthful AUC metric
-
-# python compute_tauc.py --input_file halueval/llama-3.2-3b/results_evaluated.json --alpha_max 1.0
-# python compute_tauc.py --input_file medqa/llama-3.2-3b/results_evaluated.json --alpha_max 1.0
-# python compute_tauc.py --input_file sciq/llama-3.2-3b/results_evaluated.json --alpha_max 1.0
-
-# =============================================================================
-# 7. KL Divergence Analysis (compute_kl_divergence.py)
-# =============================================================================
-# Analyze KL divergence between base and trained model
-
-# python compute_kl_divergence.py --dataname halueval --our_model_name sample_weight_reverse_smooth_llm_idk0.16 --base_model $BASE_MODEL
-# python compute_kl_divergence.py --dataname medqa --our_model_name sample_weight_reverse_smooth_llm_idk0.16 --base_model $BASE_MODEL
-# python compute_kl_divergence.py --dataname sciq --our_model_name sample_weight_reverse_smooth_llm_idk0.16 --base_model $BASE_MODEL
-
-# =============================================================================
-# 8. Model Comparison (compare_models.py)
-# =============================================================================
-# Compare KWT vs SFT vs Base model performance
-
-# python compare_models.py \
-#     --kwt_file halueval/llama-3.2-3b/kwt_results.jsonl \
-#     --sft_file halueval/llama-3.2-3b/sft_results.jsonl \
-#     --base_file halueval/llama-3.2-3b/base_results.jsonl
-
-# =============================================================================
-# 9. IDK Probability Visualization (visualize_idk_prob.py)
-# =============================================================================
-# Visualize IDK probability sequences
-
-# python visualize_idk_prob.py --input_file results_with_prob.jsonl --output_dir figures/
-
-# =============================================================================
-# 10. Extract IDK Correct Cases (extract_idk_correct.py)
-# =============================================================================
-# Extract cases correctly handled by IDK response
-
-# python extract_idk_correct.py --input_file results.jsonl --output_file idk_correct_cases.jsonl
+    # Figures 2-3: <IDK> probability over response positions (append- vs. prepend-IDK)
+    python run_idk_prob.py --dataname $DS --base_model $BASE_MODEL --save_run_name sample_weight_reverse_smooth
+    python run_idk_prob.py --dataname $DS --base_model $BASE_MODEL --save_run_name sample_weighted_reverse_ridk
+done
+python visualize_idk_prob.py --model_name $MODEL_NAME --run_stem sample_weight_reverse_smooth_llm_idk0.16
+python visualize_idk_prob.py --model_name $MODEL_NAME --run_stem sample_weighted_reverse_ridk_llm_idk0.16

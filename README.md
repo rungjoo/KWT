@@ -1,146 +1,104 @@
-# Hallucination-Aware LLM Training
+# KWT: Knowledge-Weighted Fine-Tuning
 
-A framework for training LLMs to detect hallucinations and learn to respond with "I don't know" (IDK) when uncertain.
+Code for the paper **"What Models Know, How Well They Know It: Knowledge-Weighted Fine-Tuning for Learning When to Say "I Don't Know""** ([arXiv:2604.05779](https://arxiv.org/abs/2604.05779)).
 
-## Overview
+KWT estimates, for every fine-tuning instance, how well the pre-trained model already knows the answer. It then uses that knowledge score to
+1. weight each instance's loss by the model's knowledge (familiarity weighting), and
+2. append a special `<IDK>` token to the target of instances the model does not know at all (knowledge score = 0).
 
-This project trains LLMs to recognize when they don't know the answer to a question and respond with "I don't know" instead of hallucinating. It uses sample-weighted training based on model accuracy to apply differential learning.
+The knowledge score is estimated with multi-sampled 3-shot inference (S = 5 responses per question). Each response is judged against the gold answer with EM, ROUGE-L or LLM-as-a-judge.
 
-## Project Structure
+## Repository structure
 
 ```
-hall/
-├── dataset/           # Datasets (HaluEval, MedQA, SciQ)
-├── training/          # Model training scripts
-├── inference/         # Inference and answer evaluation
-├── analysis/          # Result analysis and visualization
-├── README.md          # Project description (this file)
-└── CLAUDE.md          # Claude Code guide
+KWT/
+├── paths.py        # shared path conventions (datasets, knowledge files, checkpoints, results)
+├── dataset/        # HaluEval / MedQA / SciQ splits, OOD sets, human annotation
+├── inference/      # Step 1. knowledge estimation with the base model
+├── training/       # Step 2. KWT and baselines
+├── analysis/       # Step 3. evaluation, metrics and analyses
+└── checkpoints/    # created by training (git-ignored)
 ```
 
-## Quick Start
+All paths are resolved relative to the repository root (`paths.py`), so the scripts can be launched from any directory.
 
-### 1. Environment Setup
+## Setup
 
 ```bash
-pip install torch transformers datasets wandb tqdm
+pip install -r requirements.txt
 ```
 
-### 2. Full Pipeline
+The experiments use `meta-llama/Llama-3.2-3B` (and `Qwen/Qwen2.5-3B`, Appendix C) as base models and `google/gemma-3-12b-it` as the LLM judge. Every script accepts a Hugging Face id or a local path (`--base_model` / `--model_path` / `--judge_model_path`).
 
-```
-[Data Preparation] → [Model Training] → [Inference] → [Evaluation] → [Analysis]
-```
+## Reproducing the paper
 
-## Execution Order
-
-### Step 1: Check Data
 ```bash
-ls dataset/halueval/
-# train.jsonl, val.jsonl, test.jsonl
+bash inference/run.sh   # 1. knowledge estimation   -> inference/<dataset>/<model>/*_evaluated_{llm,rouge*,em}.json
+bash training/run.sh    # 2. fine-tuning            -> checkpoints/<dataset>/<model>/<run_name>/...
+bash analysis/run.sh    # 3. evaluation & analysis  -> analysis/<dataset>/<model>/...
 ```
 
-### Step 2: Train Model
-```bash
-cd training
+For Qwen, prefix each command with `BASE_MODEL=Qwen/Qwen2.5-3B`. Each `run.sh` lists the individual commands, which can also be run one by one. See the README in each folder for details.
 
-# Basic SFT training
-python train_sft.py --model_path /path/to/llama --dataname halueval
+### Methods and run names
 
-# Weighted sample training (recommended)
-python train_weighted.py \
-    --model_path /path/to/llama \
-    --dataname halueval \
-    --sft_idk_weight 0.16
+Run names (`--save_run_name`) are kept identical to the ones used for the experiments, so checkpoint and result file names match.
+
+| Paper | `--save_run_name` | Script | Knowledge / notes |
+|---|---|---|---|
+| **KWT** (F weighting, append-IDK) | `sample_weight_reverse_smooth` | `train_weighted.py` | `--eval_method {llm,rouge,em}` |
+| KWT-RF | `sample_weight_smooth` | `train_weighted.py` | `--sft_idk_weight 1.0` |
+| KWT-U | `sample_uniform` | `train_weighted.py` | `--sft_idk_weight 1.0` |
+| KWT (prepend-IDK) | `sample_weighted_reverse_ridk` | `train_weighted.py` | |
+| KWT (only-IDK) | `sample_weighted_reverse_idkonly` | `train_weighted.py` | |
+| KWT (non-IDK) | `sample_weight_reverse_smooth` | `train_weighted_noidk.py` | saved as `..._noidk` |
+| SFT | `sft` | `train_weighted.py` | |
+| FT-TOP | `popular` | `train_weighted.py` | trains only on KS > 0 |
+| R-Tuning | `rtuning_r` | `train_weighted.py` | greedy response + EM, `--sft_idk_weight 1.0` |
+| SEAL | `seal` | `train_seal.py` | |
+
+Sample weights (S = 5, KS = knowledge score):
+- F: `w = (S·KS + 1) / (S + 1)`
+- RF: `w = 1 − S·KS / (S + 1)`
+- U: `w = 1`
+
+`--sft_idk_weight` only affects `sample_uniform` and `rtuning_r`. For the other strategies it only appears in the output name (`..._idk0.16`).
+
+### Where each result comes from
+
+| Paper | Script |
+|---|---|
+| Table 2 (agreement with humans) | `inference/compare_human_annotation.py` |
+| Table 3 (knowledge-score distribution) | `inference/compute_stats.py` |
+| Tables 5, 6, 9, 11, 14, 15, 16 | `analysis/evaluate_results.py` → `analysis/check_answers.py` → `analysis/compute_metrics.py` |
+| Table 8 (SEAL), Table 16 (only-IDK) | `compute_metrics.py --idk_as_incorrect` |
+| Table 10 (knowledge in prompt) | `evaluate_results.py --method knowledge` |
+| Tables 7, 13 (OOD) | `analysis/evaluate_ood.py` → `compute_metrics.py --ood_dataset {RefuNQ,selfAware,NEC}` |
+| Table 12 (KL divergence) | `analysis/compute_kl_divergence.py` |
+| Figure 1 (IDK rate vs. knowledge score) | `analysis/analyze_by_knowledge.py` |
+| Figures 2, 3 (IDK probability by position) | `analysis/run_idk_prob.py` → `analysis/visualize_idk_prob.py` |
+
+### Metrics
+
+With the confusion matrix `A` (correct, with `<IDK>`), `B` (incorrect, with `<IDK>`), `C` (correct, without `<IDK>`) and `D` (incorrect, without `<IDK>`):
+
+- **Accuracy** = (A+C) / (A+B+C+D)
+- **nAUPC**: normalized area under UA-Acc(α) · CA-Acc(α) over α ∈ [0, 1], where UA-Acc(α) = (αB + C) / N and CA-Acc(α) = (C − αA) / N
+- **A-FPR** = A / (A+C)
+- **IDK Precision** = B / (A+B)
+- **IDK Recall** = B / (B+D)
+
+## Datasets
+
+See [dataset/README.md](dataset/README.md). HaluEval ([Li et al., 2023](https://github.com/RUCAIBox/HaluEval)) is split 8:2 into train/test. The other datasets are MedQA ([Jin et al., 2021](https://github.com/jind11/MedQA)), SciQ ([Welbl et al., 2017](https://allenai.org/data/sciq)), NEC and RefuNQ ([Liu et al., 2024](https://github.com/genglinliu/UnknownBench)), and SelfAware ([Yin et al., 2023](https://github.com/yinzhangyue/SelfAware)). Please follow the original licenses of each dataset.
+
+## Citation
+
+```bibtex
+@article{lee2026kwt,
+  title   = {What Models Know, How Well They Know It: Knowledge-Weighted Fine-Tuning for Learning When to Say "I Don't Know"},
+  author  = {Lee, Joosung and Jo, Hwiyeol and Ko, Donghyeon and Chae, Kyubyung and Park, Cheonbok and Kim, Jeonghoon},
+  journal = {arXiv preprint arXiv:2604.05779},
+  year    = {2026}
+}
 ```
-
-### Step 3: Run Inference
-```bash
-cd inference
-
-python run_inference.py \
-    --model_path /path/to/trained_model \
-    --dataname halueval \
-    --split test
-```
-
-### Step 4: Evaluate Answers
-```bash
-python check_answers.py \
-    --input_file halueval/model_results.jsonl \
-    --model_path /path/to/judge_model
-```
-
-### Step 5: Analyze Results
-```bash
-cd analysis
-
-# Basic evaluation
-python evaluate_results.py \
-    --model_path /path/to/model \
-    --dataname halueval
-
-# Compute TAUC metric
-python compute_tauc.py --input_file results_evaluated.json
-```
-
-## Key Features
-
-### Sample-Weighted Training
-- Apply different weights to samples based on model accuracy
-- Higher weights for difficult questions (lower accuracy)
-- Train `<IDK>` token for "I don't know" responses
-
-### Evaluation Metrics
-| Metric | Description |
-|--------|-------------|
-| Accuracy | Correctness rate |
-| IDK Ratio | Ratio of IDK responses |
-| TAUC | Accuracy-IDK trade-off metric |
-
-### Supported Datasets
-| Dataset | Domain |
-|---------|--------|
-| HaluEval | General QA |
-| MedQA | Medical |
-| SciQ | Science |
-
-## Folder Details
-
-See `README.md` in each folder for details:
-- [training/README.md](training/README.md) - Training scripts
-- [inference/README.md](inference/README.md) - Inference scripts
-- [analysis/README.md](analysis/README.md) - Analysis scripts
-- [dataset/README.md](dataset/README.md) - Datasets
-
-## Training Strategies
-
-### 1. Basic SFT
-Train with uniform weights for all samples
-
-### 2. Weighted Training (Recommended)
-```
-High accuracy → Low weight (easy questions)
-Low accuracy  → High weight (hard questions)
-Zero accuracy → Learn IDK response
-```
-
-### 3. SEAL
-Self-Aware Learning method
-
-## Example Results
-
-```
-Model: sample_weight_reverse_smooth_llm_idk0.16
-Dataset: HaluEval
-
-Accuracy: 72.5%
-IDK Ratio: 15.3%
-TAUC: 0.847
-```
-
-## Notes
-
-- Model checkpoints are excluded from Git via `.gitignore`
-- Result files (`.jsonl`, `_evaluated.json`) are also excluded
-- Wandb logs are saved in `training/wandb/`

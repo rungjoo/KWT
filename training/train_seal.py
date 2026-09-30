@@ -1,8 +1,6 @@
-import os
+import sys
 import torch
 import json
-import math
-import copy, random
 import argparse
 import wandb
 from datasets import Dataset
@@ -15,15 +13,15 @@ from transformers import (
 )
 from dataclasses import dataclass
 from typing import Dict, List, Any
+import numpy as np
 import warnings
 warnings.filterwarnings("ignore")
 
-def get_model_name(model_path):
-    """Extract model name from model path for directory naming"""
-    return Path(model_path).name.lower()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from paths import CKPT_DIR, get_model_name, resolve_threshold, knowledge_file, checkpoint_dir
 
 ######################################
-# 1) 데이터 로딩
+# 1) Data loading
 ######################################
 
 def load_data(filepath):
@@ -54,7 +52,7 @@ def load_data(filepath):
     return data_type
 
 ######################################
-# 2) 프롬프트/토크나이즈
+# 2) Prompt / tokenization
 ######################################
 def create_prompt(question):
     return f"Question: {question}\n\nAnswer:"
@@ -85,7 +83,7 @@ def preprocess_tokenize(item, tokenizer, max_length=1024):
     return ex
 
 ######################################
-# 3) Collator: 배치 패딩 처리
+# 3) Collator
 ######################################
 @dataclass
 class SimpleCollator:
@@ -131,7 +129,7 @@ class SimpleCollator:
         return torch.tensor(out, dtype=torch.long)
     
 ######################################
-# 4) 커스텀 Trainer
+# 4) Trainer
 ######################################
 class DynamicTargetTrainer(Trainer):
     def __init__(self, idk_token_id, tokenizer, *args, **kwargs):
@@ -245,7 +243,6 @@ class DynamicTargetTrainer(Trainer):
                         target_idk_probs.append(target_dist[b, t, self.idk_token_id].item())
 
             if alpha_values:
-                import numpy as np
                 # Calculate statistics
                 alpha_mean = np.mean(alpha_values)
                 alpha_min = np.min(alpha_values)
@@ -341,7 +338,7 @@ def main(args):
     model_path = args.model_path
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token  # 안전하게 eos를 pad로 사용
+        tokenizer.pad_token = tokenizer.eos_token
         print("Set: tokenizer padding")
 
     # Add <IDK> special token
@@ -361,16 +358,7 @@ def main(args):
     idk_token_id = tokenizer.convert_tokens_to_ids(special_token)
     print(f"<IDK> token ID: {idk_token_id}")
 
-    # Initialize <IDK> token embedding with average of "I don't know"
-    # idk_text = "I don't know"
-    # idk_tokens = tokenizer(idk_text, return_tensors="pt", add_special_tokens=False)
-
-    # with torch.no_grad():
-    #     input_embeddings = model.get_input_embeddings()
-    #     idk_embeddings = input_embeddings(idk_tokens['input_ids'][0].to(model.device))
-    #     mean_embedding = idk_embeddings.mean(dim=0)
-    #     input_embeddings.weight[idk_token_id] = mean_embedding
-    #     print(f"Initialized <IDK> embedding with mean of '{idk_text}' tokens")
+    # Unlike KWT, the <IDK> embedding is not initialized from "I don't know" here.
 
     # Enable gradient checkpointing for memory efficiency
     model.gradient_checkpointing_enable()
@@ -397,14 +385,12 @@ def main(args):
         learning_rate=args.lr,
         warmup_ratio=0.03,
         weight_decay=0.01,
-        logging_steps= args.logging_steps,
-        # save_steps= args.save_steps,
-        save_strategy="no", 
-        save_total_limit=2,
-        bf16=torch.cuda.is_available(),  # A100/H100면 bf16, 아니면 자동으로 fp32 사용
-        remove_unused_columns=False,     # collator가 dict 구조를 유지하도록
+        logging_steps=args.logging_steps,
+        save_strategy="no",
+        bf16=torch.cuda.is_available(),
+        remove_unused_columns=False,
         report_to="wandb",
-    )    
+    )
 
     trainer = DynamicTargetTrainer(
         idk_token_id=idk_token_id,
@@ -418,31 +404,29 @@ def main(args):
     trainer.train()
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
-    print("Training finished.")    
+    print("Training finished.")
 
 if __name__ == "__main__":
-    # python3 train_seal.py --dataname halueval --epochs 3 --save_run_name seal
-    parser = argparse.ArgumentParser(description='Train model with sample-weighted SFT')
-    parser.add_argument('--dataname', type=str, required=True, help='Dataset name (e.g., halueval, medqa)')
-    parser.add_argument('--model_path', type=str, default="../../model/Llama-3.2-3B")
+    parser = argparse.ArgumentParser(description='SEAL baseline: token-level <IDK> probability reallocation')
+    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa', 'sciq'])
+    parser.add_argument('--model_path', type=str, default="meta-llama/Llama-3.2-3B")
+    parser.add_argument('--ckpt_root', type=str, default=str(CKPT_DIR), help='Root directory for checkpoints')
     parser.add_argument('--max_length', type=int, default=1024)
 
     parser.add_argument('--epochs', type=int, default=3)
     parser.add_argument('--batch_size', type=int, default=4)
     parser.add_argument('--grad_accum', type=int, default=8)
-    parser.add_argument('--lr', type=float, default=2e-5) # 5e-6
-
+    parser.add_argument('--lr', type=float, default=2e-5)
     parser.add_argument('--logging_steps', type=int, default=10)
-
-    # Wandb configuration
-    parser.add_argument('--wandb_project', type=str, default="hall-data-cur", help='WandB project name')
-    parser.add_argument('--save_run_name', type=str, default="seal", help='WandB run name')
+    parser.add_argument('--wandb_project', type=str, default="kwt", help='WandB project name')
 
     args = parser.parse_args()
-    
+    args.save_run_name = "seal"
+
+    # SEAL only uses (question, answer) pairs; the knowledge file is read for convenience.
     model_name = get_model_name(args.model_path)
-    args.train_data_path = f"../dataset_type/{args.dataname}/{model_name}/base_model_temp0.7_samples5_fewshot3_evaluated_llm.json"
-    args.output_dir = f"/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{model_name}/{args.save_run_name}/seal"
+    args.train_data_path = str(knowledge_file(args.dataname, model_name, "llm"))
+    args.output_dir = str(checkpoint_dir(args.ckpt_root, args.dataname, model_name, "seal"))
 
     print(f"Dataset: {args.dataname}")
     print(f"Train data path: {args.train_data_path}")

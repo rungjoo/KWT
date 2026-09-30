@@ -1,7 +1,16 @@
+"""Sample ~100 questions with a diverse ROUGE/LLM score distribution for human
+annotation (paper Table 2). Each sample gets an empty 'human' field to be filled
+with true/false by the annotator; the annotated files used in the paper are in
+dataset/human_annotation/."""
+import sys
 import json
+import argparse
 import numpy as np
 from pathlib import Path
 from collections import defaultdict
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from paths import KNOWLEDGE_DIR, KNOWLEDGE_FILE_PREFIX
 
 def get_score_range(score):
     """Get the score range category for a given score."""
@@ -199,17 +208,15 @@ def extract_diverse_samples(rouge_file, llm_file, output_file, num_items=100):
     return len(annotated_results), total_samples
 
 def main():
-    # Base directory
-    base_dir = Path("/mnt/fr20tb/rungjoo/hall/dataset_type")
+    parser = argparse.ArgumentParser(description='Extract samples for human annotation')
+    parser.add_argument('--datanames', type=str, nargs='+', default=['halueval', 'medqa', 'sciq'])
+    parser.add_argument('--model_name', type=str, default='llama-3.2-3b')
+    parser.add_argument('--rouge_threshold', type=str, default='0.6')
+    parser.add_argument('--num_items', type=int, default=100)
+    args = parser.parse_args()
 
-    # Dataset names
-    datasets = ["halueval", "medqa", "sciq"]
-
-    # Input file name patterns
-    rouge_filename = "base_model_temp0.7_samples5_fewshot3_evaluated_rouge0.6.json"
-    llm_filename = "base_model_temp0.7_samples5_fewshot3_evaluated_llm.json"
-
-    # Output file name pattern
+    rouge_filename = f"{KNOWLEDGE_FILE_PREFIX}_evaluated_rouge{args.rouge_threshold}.json"
+    llm_filename = f"{KNOWLEDGE_FILE_PREFIX}_evaluated_llm.json"
     output_filename = "human_annotation_100samples_diverse.json"
 
     print("="*70)
@@ -219,38 +226,22 @@ def main():
 
     results_summary = []
 
-    # Process each dataset
-    for dataset in datasets:
-        rouge_file = base_dir / dataset / rouge_filename
-        llm_file = base_dir / dataset / llm_filename
-        output_file = base_dir / dataset / output_filename
+    for dataset in args.datanames:
+        base_dir = KNOWLEDGE_DIR / dataset / args.model_name
+        rouge_file = base_dir / rouge_filename
+        llm_file = base_dir / llm_filename
+        output_file = base_dir / output_filename
 
-        # Check if input files exist
         if not rouge_file.exists():
-            print(f"⚠ Warning: File not found - {rouge_file}")
-            print()
+            print(f"⚠ Warning: File not found - {rouge_file}\n")
             continue
-
         if not llm_file.exists():
-            print(f"⚠ Warning: File not found - {llm_file}")
-            print()
+            print(f"⚠ Warning: File not found - {llm_file}\n")
             continue
 
-        # Extract samples
-        num_questions, num_samples = extract_diverse_samples(
-            rouge_file,
-            llm_file,
-            output_file,
-            num_items=100
-        )
+        num_questions, num_samples = extract_diverse_samples(rouge_file, llm_file, output_file, num_items=args.num_items)
+        results_summary.append({"dataset": dataset, "questions": num_questions, "samples": num_samples})
 
-        results_summary.append({
-            "dataset": dataset,
-            "questions": num_questions,
-            "samples": num_samples
-        })
-
-    # Print summary
     print("="*70)
     print("SUMMARY")
     print("="*70)

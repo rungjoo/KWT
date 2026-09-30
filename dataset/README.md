@@ -1,75 +1,33 @@
 # Dataset
 
-Datasets for training and evaluation.
-
-## Folder Structure
-
 ```
 dataset/
-├── halueval/          # HaluEval dataset
-│   ├── train.jsonl
-│   ├── val.jsonl
-│   └── test.jsonl
-├── medqa/             # MedQA dataset
-│   ├── train.jsonl
-│   ├── val.jsonl
-│   └── test.jsonl
-└── sciq/              # SciQ dataset
-    ├── train.jsonl
-    ├── val.jsonl
-    └── test.jsonl
+├── halueval/            halueval_train.jsonl (8,000) / halueval_test.jsonl (2,000)   8:2 split of HaluEval QA
+├── medqa/               train.jsonl (10,178) / dev.jsonl (1,272) / test.jsonl (1,273)
+├── sciq/                train.jsonl (11,679) / validation.jsonl (1,000) / test.jsonl (1,000)
+├── ood/                 out-of-domain evaluation (analysis/evaluate_ood.py)
+│   ├── NEC/             NEC_answerable.json / NEC_unanswerable.json (+ entity lists)
+│   ├── RefuNQ/          RefuNQ_answerable.json / RefuNQ_unanswerable.json
+│   └── selfAware/       train.json
+└── human_annotation/    human correctness labels for 100 questions (500 responses) per dataset (Table 2)
 ```
 
-## Dataset Description
+Only the `train` and `test` splits are used.
 
-| Dataset | Domain | Description |
-|---------|--------|-------------|
-| HaluEval | General | QA dataset for hallucination evaluation |
-| MedQA | Medical | Medical knowledge QA dataset |
-| SciQ | Science | Science knowledge QA dataset |
+## Fields
 
-## Data Format
+| Dataset | Question | Gold answer | Knowledge paragraph |
+|---|---|---|---|
+| HaluEval | `question` | `right_answer` | `knowledge` |
+| MedQA | `question` | `answer` | – |
+| SciQ | `question` | `correct_answer` | `support` |
 
-Each JSONL file record format:
+The scripts normalize these to `question` / `right_answer` / `knowledge`. The knowledge paragraph is used only
+- by the LLM judge (when available), and
+- for knowledge-provided prompting (`evaluate_results.py --method knowledge`, Table 10).
 
-```json
-{
-  "question": "Question content",
-  "answer": "Correct answer",
-  "knowledge": "Related knowledge (optional)",
-  "support": "Supporting information (optional)"
-}
-```
+OOD files are JSON lines with `prompt` and `label` (NEC, RefuNQ). SelfAware is a JSON array with `question`, `answer` and `answerable`.
 
-## Field Description
+## Human annotation
 
-| Field | Description | Required |
-|-------|-------------|----------|
-| `question` | Question text | Yes |
-| `answer` / `right_answer` / `correct_answer` | Correct answer | Yes |
-| `knowledge` / `support` | Background knowledge | No |
-
-## Usage Example
-
-```python
-import json
-
-def load_dataset(file_path):
-    data = []
-    with open(file_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            data.append(json.loads(line.strip()))
-    return data
-
-# Load data
-train_data = load_dataset('dataset/halueval/train.jsonl')
-test_data = load_dataset('dataset/halueval/test.jsonl')
-```
-
-## Data Splits
-
-| Split | Purpose |
-|-------|---------|
-| `train.jsonl` | Model training |
-| `val.jsonl` | Validation and hyperparameter tuning |
-| `test.jsonl` | Final evaluation |
+`human_annotation/<dataset>.json` is the output of `inference/extract_samples.py` (sampled responses of Llama-3.2-3B with their ROUGE and LLM-judge scores), with the `human` field of each sampled response filled by an annotator. `inference/compare_human_annotation.py` uses these files to reproduce Table 2 and to select the ROUGE-L threshold.

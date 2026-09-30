@@ -1,95 +1,51 @@
 #!/bin/bash
 # =============================================================================
-# Inference Scripts - All Inference Commands
+# Step 1. Knowledge estimation (paper Sec. 3.1, Tables 2-3)
 # =============================================================================
-# Usage: Uncomment the commands you want to run
-
-# Model paths
-BASE_MODEL="../../model/Llama-3.2-3B"
-TRAINED_MODEL="../training/halueval/llama-3.2-3b/sample_weight_reverse_smooth_llm_idk0.16"
-JUDGE_MODEL="../../model/Llama-3.2-3B-Instruct"
-
+# Multi-sampled 3-shot inference with the base model, then judge every sampled
+# response with LLM-as-a-judge / ROUGE-L / EM. The judged files are the training
+# data of every method in training/.
+#
+# Usage:  bash inference/run.sh
+#         BASE_MODEL=Qwen/Qwen2.5-3B bash inference/run.sh
 # =============================================================================
-# 1. Model Inference (run_inference.py)
-# =============================================================================
-# Run inference on trained model
+set -e
+cd "$(dirname "$0")"
 
-# HaluEval
-# python run_inference.py \
-#     --model_path $TRAINED_MODEL \
-#     --dataname halueval \
-#     --split test \
-#     --fewshot 3 \
-#     --num_samples 5 \
-#     --temperature 0.7
+BASE_MODEL=${BASE_MODEL:-meta-llama/Llama-3.2-3B}
+JUDGE_MODEL=${JUDGE_MODEL:-google/gemma-3-12b-it}
+MODEL_NAME=$(basename "$BASE_MODEL" | tr '[:upper:]' '[:lower:]')
+declare -A ROUGE_TH=([halueval]=0.35 [medqa]=0.6 [sciq]=0.6)
 
-# MedQA
-# python run_inference.py \
-#     --model_path $TRAINED_MODEL \
-#     --dataname medqa \
-#     --split test \
-#     --fewshot 3 \
-#     --num_samples 5
+for DS in halueval medqa sciq; do
+    OUT=$DS/$MODEL_NAME
+    SAMPLED=$OUT/base_model_temp0.7_samples5_fewshot3.jsonl
 
-# SciQ
-# python run_inference.py \
-#     --model_path $TRAINED_MODEL \
-#     --dataname sciq \
-#     --split test \
-#     --fewshot 3 \
-#     --num_samples 5
+    # 1) S=5 sampled responses per training question (temperature 0.7, resampled 3-shot demos)
+    python run_inference.py --dataname $DS --base_model $BASE_MODEL --split train
 
-# =============================================================================
-# 2. Answer Checking (check_answers.py)
-# =============================================================================
-# LLM-based answer evaluation
+    # 2) Knowledge scores with each matching function
+    python check_answers.py --input_file $SAMPLED --eval_method llm --model_path $JUDGE_MODEL
+    python check_answers.py --input_file $SAMPLED --eval_method rouge --threshold ${ROUGE_TH[$DS]}
+    python check_answers.py --input_file $SAMPLED --eval_method em
 
-# python check_answers.py \
-#     --input_file halueval/llama-3.2-3b/results.jsonl \
-#     --model_path $JUDGE_MODEL
+    # 3) R-Tuning baseline: one greedy response judged by EM (known / unknown)
+    python run_inference.py --dataname $DS --base_model $BASE_MODEL --greedy
+    python check_answers.py --input_file $OUT/base_model_greedy_samples_fewshot3.jsonl --eval_method em
 
-# python check_answers.py \
-#     --input_file medqa/llama-3.2-3b/results.jsonl \
-#     --model_path $JUDGE_MODEL
+    # 4) Knowledge scores on the test split (only for the analysis in Figure 1)
+    python run_inference.py --dataname $DS --base_model $BASE_MODEL --split test
+    python check_answers.py --input_file $OUT/test/base_model_temp0.7_samples5_fewshot3.jsonl \
+        --eval_method llm --model_path $JUDGE_MODEL
 
-# python check_answers.py \
-#     --input_file sciq/llama-3.2-3b/results.jsonl \
-#     --model_path $JUDGE_MODEL
+    # Table 3: distribution of knowledge scores
+    for M in em rouge${ROUGE_TH[$DS]} llm; do
+        python compute_stats.py --input_file $OUT/base_model_temp0.7_samples5_fewshot3_evaluated_$M.json
+    done
+done
 
-# =============================================================================
-# 3. Compute Statistics (compute_stats.py)
-# =============================================================================
-# Compute evaluation statistics
-
-# python compute_stats.py --input_file halueval/llama-3.2-3b/results_evaluated.json
-# python compute_stats.py --input_file medqa/llama-3.2-3b/results_evaluated.json
-# python compute_stats.py --input_file sciq/llama-3.2-3b/results_evaluated.json
-
-# =============================================================================
-# 4. Extract Diverse Samples (extract_samples.py)
-# =============================================================================
-# Extract samples with diverse score ranges for annotation
-
-# python extract_samples.py \
-#     --rouge_file halueval/llama-3.2-3b/rouge_results.json \
-#     --llm_file halueval/llama-3.2-3b/llm_results.json \
-#     --output_file halueval/llama-3.2-3b/diverse_samples.json \
-#     --num_items 100
-
-# =============================================================================
-# 5. Compare with Human Annotation (compare_human_annotation.py)
-# =============================================================================
-# Compare LLM evaluation with human annotation
-
-# python compare_human_annotation.py \
-#     --annotation_file halueval/llama-3.2-3b/human_annotation.json \
-#     --llm_file halueval/llama-3.2-3b/llm_results.json
-
-# =============================================================================
-# 6. Compare LLM vs ROUGE (compare_llm_rouge.py)
-# =============================================================================
-# Compare LLM evaluation with ROUGE scores
-
-# python compare_llm_rouge.py \
-#     --llm_file halueval/llama-3.2-3b/llm_results.json \
-#     --rouge_file halueval/llama-3.2-3b/rouge_results.json
+# Table 2: agreement of EM / ROUGE / LLM-as-a-judge with human annotation
+#   (annotated files are provided in dataset/human_annotation/;
+#    extract_samples.py re-creates the un-annotated sampling if needed)
+python compare_human_annotation.py --input_file ../dataset/human_annotation/halueval.json
+python compare_human_annotation.py --input_file ../dataset/human_annotation/medqa.json

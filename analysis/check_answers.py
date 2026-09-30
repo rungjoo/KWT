@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""Judge test-set generations of fine-tuned models (output of evaluate_results.py).
+
+Each item is labeled correct/incorrect (LLM-as-a-judge or ROUGE-L) after removing
+<IDK>, and `had_idk_token` records whether <IDK> was generated. These two fields
+define the A/B/C/D confusion matrix used by compute_metrics.py."""
 import json
 import argparse
 import torch
@@ -108,25 +113,23 @@ def evaluate_answer_rouge(right_answer, model_answer, threshold=0.5):
 
 
 def process_results_file(file_path, model, tokenizer, eval_method='llm', threshold=None):
-    """Process a HaluEval results file and evaluate answers
+    """Evaluate a results file
 
     Args:
         file_path: Path to the JSON or JSONL file
         model: Model for LLM evaluation (None if not using llm method)
         tokenizer: Tokenizer for LLM evaluation (None if not using llm method)
-        eval_method: Evaluation method ('llm', 'rouge', 'all')
-        threshold: Threshold for rouge (default: 0.6 for rouge)
+        eval_method: Evaluation method ('llm' or 'rouge')
+        threshold: Threshold for rouge (default: 0.6)
     """
 
     print(f"\nProcessing file: {file_path}")
     print(f"Evaluation method: {eval_method}")
 
-    # Set default threshold based on method
-    if threshold is None:
-        if eval_method in ['rouge', 'all']:
-            threshold = 0.6
+    if eval_method == 'rouge' and threshold is None:
+        threshold = 0.6
 
-    if eval_method in ['rouge', 'all'] and threshold is not None:
+    if eval_method == 'rouge':
         print(f"Threshold (Rouge): {threshold}")
 
     # Load data - support both JSONL and JSON formats
@@ -213,15 +216,6 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
             eval_result, is_correct, score = evaluate_answer_llm(model, tokenizer, question, knowledge, right_answer, answer_for_comparison)
         elif eval_method == 'rouge':
             eval_result, is_correct, score = evaluate_answer_rouge(right_answer, answer_for_comparison, threshold)
-        elif eval_method == 'all':
-            # Evaluate with both Rouge and LLM - both must agree
-            rouge_result, rouge_correct, rouge_score = evaluate_answer_rouge(right_answer, answer_for_comparison, threshold)
-            llm_result, llm_correct, llm_score = evaluate_answer_llm(model, tokenizer, question, knowledge, right_answer, answer_for_comparison)
-
-            # Both must be correct for final result to be correct
-            is_correct = rouge_correct and llm_correct
-            eval_result = 'correct' if is_correct else 'incorrect'
-            score = {'rouge': rouge_score, 'llm': llm_score, 'both_agree': is_correct}
         else:
             raise ValueError(f"Unknown evaluation method: {eval_method}")
 
@@ -262,15 +256,7 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
     avoidance_rate = (avoided_hallucination / total * 100) if total > 0 else 0
     incorrect_rate = (incorrect / total * 100) if total > 0 else 0
 
-    # Calculate average score - handle dict scores for 'all' method
-    if eval_method == 'all':
-        avg_score = {
-            'rouge': sum(s['rouge'] for s in scores) / len(scores) if scores else 0,
-            'llm': sum(s['llm'] for s in scores) / len(scores) if scores else 0,
-            'both_agree_rate': sum(1 for s in scores if s['both_agree']) / len(scores) * 100 if scores else 0
-        }
-    else:
-        avg_score = sum(scores) / len(scores) if scores else 0
+    avg_score = sum(scores) / len(scores) if scores else 0
 
     # Count answers with IDK token
     idk_count = sum(1 for r in results if r.get('had_idk_token', False))
@@ -279,18 +265,13 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
     print(f"\n" + "="*60)
     print(f"Results Summary:")
     print(f"  Evaluation method: {eval_method}")
-    if eval_method in ['rouge', 'all']:
+    if eval_method == 'rouge':
         print(f"  Threshold (Rouge): {threshold}")
     print(f"  Total samples: {total}")
     print(f"\n  Overall:")
     print(f"    Correct answers: {correct} ({accuracy:.2f}%)")
     print(f"    Incorrect answers: {incorrect} ({incorrect_rate:.2f}%)")
-    if eval_method == 'all':
-        print(f"    Average Rouge score: {avg_score['rouge']:.4f}")
-        print(f"    Average LLM score: {avg_score['llm']:.4f}")
-        print(f"    Both agree rate: {avg_score['both_agree_rate']:.2f}%")
-    else:
-        print(f"    Average score: {avg_score:.4f}")
+    print(f"    Average score: {avg_score:.4f}")
     print(f"\n  Breakdown by <IDK> presence:")
     print(f"    Correct WITH <IDK>: {correct_with_idk} ({correct_with_idk/total*100:.2f}%)")
     print(f"    Correct WITHOUT <IDK>: {correct_without_idk} ({correct_without_idk/total*100:.2f}%)")
@@ -302,20 +283,20 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
     print("="*60)
 
     # Save detailed results
-    threshold_str = str(threshold) if eval_method in ['rouge', 'all'] else ''
+    threshold_str = str(threshold) if eval_method == 'rouge' else ''
     output_file = file_path.replace('.jsonl', f'_evaluated_{eval_method}{threshold_str}.json')
     if '.jsonl' not in file_path:
         # Handle both .json and other extensions
         base_name = file_path.rsplit('.', 1)[0]
         # Remove any existing _evaluated_* suffix
-        base_name = base_name.replace('_evaluated_rouge', '').replace('_evaluated_llm', '').replace('_evaluated_all', '')
+        base_name = base_name.replace('_evaluated_rouge', '').replace('_evaluated_llm', '')
         output_file = f'{base_name}_evaluated_{eval_method}{threshold_str}.json'
 
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump({
             'summary': {
                 'eval_method': eval_method,
-                'threshold': threshold if eval_method in ['rouge', 'all'] else None,
+                'threshold': threshold if eval_method == 'rouge' else None,
                 'total': total,
                 'correct': correct,
                 'incorrect': incorrect,
@@ -343,47 +324,29 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
     return accuracy, incorrect_rate, avoidance_rate
 
 def main():
-    # Example usage:
-    # python3 02_halueval_answer_check.py --input_file halueval/llama_3.2-3b/sft.jsonl --eval_method llm
-    # python3 02_halueval_answer_check.py --input_file sciq/llama_3.2-3b/base_model.jsonl --eval_method llm
-    # python3 02_halueval_answer_check.py --input_file sciq/llama_3.2-3b/instruct_idk.jsonl --eval_method llm
-    # python3 02_halueval_answer_check.py --input_file sciq/llama_3.2-3b/instruct_no_idk.jsonl --eval_method llm
-    # python3 02_halueval_answer_check.py --input_file halueval/llama_3.2-3b/seal.jsonl --eval_method all --threshold 0.6
-    parser = argparse.ArgumentParser(description='Evaluate HaluEval model answers using various methods')
+    parser = argparse.ArgumentParser(description='Judge test-set generations of fine-tuned models')
     parser.add_argument('--input_file', type=str, required=True,
-                       help='Path to HaluEval JSON/JSONL file (e.g., halueval/llama_3.2-3b/base_model.jsonl)')
-    parser.add_argument('--eval_method', type=str, default='llm',
-                       choices=['llm', 'rouge', 'all'],
-                       help='Evaluation method: llm (default), rouge, or all (both Rouge and LLM must agree)')
-    parser.add_argument('--model_path', type=str,
-                       default='../../model/gemma-3-12b-it',
-                       help='Path to evaluation model (needed for llm and all methods)')
-    parser.add_argument('--threshold', type=str, default="",
-                       help='Threshold for rouge (default: 0.6 for rouge)')
+                        help='Output of evaluate_results.py (e.g. halueval/llama-3.2-3b/sample_weight_reverse_smooth_llm_idk0.16.jsonl)')
+    parser.add_argument('--eval_method', type=str, default='llm', choices=['llm', 'rouge'],
+                        help='Evaluation method: llm (default, used in the paper) or rouge')
+    parser.add_argument('--model_path', type=str, default='google/gemma-3-12b-it',
+                        help='Judge model (needed for the llm method)')
+    parser.add_argument('--threshold', type=float, default=None,
+                        help='ROUGE-L threshold for the rouge method (default: 0.6)')
 
     args = parser.parse_args()
 
-    # Check if input file exists
     if not os.path.exists(args.input_file):
         print(f"Error: Input file '{args.input_file}' not found")
         return
-    
-    if args.eval_method == "llm":
-        args.threshold = ""
-    elif args.eval_method in ["rouge", "all"]:
-        args.threshold = float(args.threshold) if args.threshold else None
-    else:
-        args.threshold = None    
 
-    # Load model if using LLM or ALL method
     model = None
     tokenizer = None
-    if args.eval_method in ['llm', 'all']:
+    if args.eval_method == 'llm':
         model, tokenizer = load_model(args.model_path)
     else:
         print(f"Using {args.eval_method} method - no model loading required")
 
-    # Process the results file
     accuracy, incorrect_rate, avoidance_rate = process_results_file(
         args.input_file,
         model,

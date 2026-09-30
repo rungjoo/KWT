@@ -1,8 +1,6 @@
-import os
+import sys
 import torch
 import json
-import math
-import copy, random
 import argparse
 import wandb
 from pathlib import Path
@@ -18,172 +16,84 @@ from typing import Dict, List, Any
 import warnings
 warnings.filterwarnings("ignore")
 
-def get_model_name(model_path):
-    """Extract model name from model path for directory naming"""
-    return Path(model_path).name.lower()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from paths import CKPT_DIR, get_model_name, resolve_threshold, knowledge_file, checkpoint_dir
 
 ######################################
-# 1) 데이터 로딩
+# 1) Data loading / sample weighting
 ######################################
+# Each strategy maps (samples_correct, samples_total, sft_idk_weight) to
+# (sample_weight, loss_type, idk_mode), where idk_mode is one of
+#   False      : response = answer
+#   True       : response = "answer <IDK>"   (append-IDK, default KWT)
+#   "ridk"     : response = "<IDK> answer"   (prepend-IDK)
+#   "idk_only" : response = "<IDK>"          (only-IDK)
+# samples_total is S (=5) and samples_correct / samples_total is the knowledge score KS.
 
-def calculate_sample_weight_noidk(samples_correct, samples_total, sft_idk_weight):
-    sample_weight = 1.0
-    loss_type = 'sft'
-    should_add_idk = False
+def weight_sft(samples_correct, samples_total, sft_idk_weight):
+    """SFT: uniform weight, no <IDK>."""
+    return 1.0, "sft", False
 
-    return sample_weight, loss_type, should_add_idk
-
-def calculate_sample_weight_default(samples_correct, samples_total, sft_idk_weight):
-    """
-    Default sample weighting strategy.
-    Higher weight for harder questions (fewer correct samples).
-
-    Args:
-        samples_correct: Number of correct samples out of total
-        samples_total: Total number of samples
-        sft_idk_weight: Weight to use for IDK cases (samples_correct = 0)
-
-    Returns:
-        tuple: (sample_weight, loss_type, should_add_idk_token)
-            - sample_weight: Weight value for this sample
-            - loss_type: 'sft' or 'sft_idk'
-            - should_add_idk_token: Whether to append <IDK> to the response
-    """
+def weight_popular(samples_correct, samples_total, sft_idk_weight):
+    """FT-TOP: train only on samples the base model already knows."""
     if samples_correct > 0:
-        accuracy = samples_correct / samples_total
-        # ranges from 1.0 (1/5 correct) to 0.2 (5/5 correct)
-        sample_weight = 1.2 - accuracy
-        loss_type = 'sft'
-        should_add_idk = False
-    else:
-        sample_weight = sft_idk_weight
-        loss_type = "sft_idk"
-        should_add_idk = True
+        return 1.0, "sft", False
+    return 0, 0, 0
 
-    return sample_weight, loss_type, should_add_idk
-
-def calculate_sample_weight_reverse(samples_correct, samples_total, sft_idk_weight):
+def weight_uniform(samples_correct, samples_total, sft_idk_weight):
+    """KWT-U / R-Tuning: weight 1 for known samples, sft_idk_weight for unknown (+<IDK>)."""
     if samples_correct > 0:
-        accuracy = samples_correct / samples_total
-        # ranges from 1.0 (5/5 correct) to 0.2 (1/5 correct)
-        sample_weight = accuracy
-        loss_type = 'sft'
-        should_add_idk = False
-    else:
-        sample_weight = sft_idk_weight
-        loss_type = "sft_idk"
-        should_add_idk = True
+        return 1.0, "sft", False
+    return sft_idk_weight, "sft_idk", True
 
-    return sample_weight, loss_type, should_add_idk
+def familiarity_weight(samples_correct, samples_total):
+    """Familiarity (F) weight, Eq. (3): (S*KS + 1) / (S + 1), ranges from 1/6 to 1."""
+    return (samples_correct + 1) / (samples_total + 1)
 
-def calculate_sample_weight_reverse_smooth(samples_correct, samples_total, sft_idk_weight):
+def weight_familiarity(samples_correct, samples_total, sft_idk_weight):
+    """KWT (F weighting, append-IDK)."""
+    w = familiarity_weight(samples_correct, samples_total)
     if samples_correct > 0:
-        # ranges from 2/6 (1/5 correct) to 6/6 (5/5 correct)
-        sample_weight = (samples_correct+1) / (samples_total+1)
-        loss_type = 'sft'
-        should_add_idk = False
-    else:
-        # ranges from 1/6 (0/5 correct)
-        sample_weight = (samples_correct+1) / (samples_total+1)
-        loss_type = "sft_idk"
-        should_add_idk = True
+        return w, "sft", False
+    return w, "sft_idk", True
 
-    return sample_weight, loss_type, should_add_idk    
-
-def calculate_sample_weight_smooth(samples_correct, samples_total, sft_idk_weight):
+def weight_reverse_familiarity(samples_correct, samples_total, sft_idk_weight):
+    """KWT-RF, Eq. (4): 1 - S*KS / (S + 1), ranges from 1 to 1/6."""
+    w = 1 - samples_correct / (samples_total + 1)
     if samples_correct > 0:
-        # ranges from 5/6 (1/5 correct) to 1/6 (5/5 correct)
-        sample_weight = 1 - (samples_correct) / (samples_total+1)
-        loss_type = 'sft'
-        should_add_idk = False
-    else:
-        # ranges from 1 (0/5 correct)
-        sample_weight = 1 - (samples_correct) / (samples_total+1)
-        loss_type = "sft_idk"
-        should_add_idk = True
+        return w, "sft", False
+    return w, "sft_idk", True
 
-    return sample_weight, loss_type, should_add_idk    
-
-def calculate_sample_weight_reverse_idkonly(samples_correct, samples_total, sft_idk_weight):
+def weight_familiarity_prepend_idk(samples_correct, samples_total, sft_idk_weight):
+    """KWT (prepend-IDK), Appendix D."""
+    w = familiarity_weight(samples_correct, samples_total)
     if samples_correct > 0:
-        # ranges from 2/6 (1/5 correct) to 6/6 (5/5 correct)
-        sample_weight = (samples_correct+1) / (samples_total+1)
-        loss_type = 'sft'
-        should_add_idk = False
-    else:
-        # ranges from 1/6 (0/5 correct)
-        sample_weight = (samples_correct+1) / (samples_total+1)
-        loss_type = "sft_idk"
-        should_add_idk = "idk_only"  # response will be just "<IDK>" without right_answer
+        return w, "sft", False
+    return w, "sft_idk", "ridk"
 
-    return sample_weight, loss_type, should_add_idk
-
-def calculate_sample_weight_reverse_ridk(samples_correct, samples_total, sft_idk_weight):
+def weight_familiarity_only_idk(samples_correct, samples_total, sft_idk_weight):
+    """KWT (only-IDK), Appendix D."""
+    w = familiarity_weight(samples_correct, samples_total)
     if samples_correct > 0:
-        # ranges from 2/6 (1/5 correct) to 6/6 (5/5 correct)
-        sample_weight = (samples_correct+1) / (samples_total+1)
-        loss_type = 'sft'
-        should_add_idk = False
-    else:
-        # ranges from 1/6 (0/5 correct)
-        sample_weight = (samples_correct+1) / (samples_total+1)
-        loss_type = "sft_idk"
-        should_add_idk = "ridk"  # response will be just "<IDK>" without right_answer
+        return w, "sft", False
+    return w, "sft_idk", "idk_only"
 
-    return sample_weight, loss_type, should_add_idk
-
-def calculate_sample_weight_popular(samples_correct, samples_total, sft_idk_weight):
-    if samples_correct > 0:
-        sample_weight = 1.0
-        loss_type = 'sft'
-        should_add_idk = False
-    else:
-        return 0, 0, 0
-
-    return sample_weight, loss_type, should_add_idk
-
-def calculate_sample_weight_uniform(samples_correct, samples_total, sft_idk_weight):
-    if samples_correct > 0:
-        sample_weight = 1.0
-        loss_type = 'sft'
-        should_add_idk = False
-    else:
-        sample_weight = sft_idk_weight
-        loss_type = "sft_idk"
-        should_add_idk = True
-
-    return sample_weight, loss_type, should_add_idk
-
-# Dictionary mapping strategy names to functions
+# --save_run_name -> strategy. Names are kept as-is so that checkpoint / result
+# file names stay consistent with the released experiments.
 SAMPLE_WEIGHT_STRATEGIES = {
-    'sft': calculate_sample_weight_noidk,
-    'sample_weighted': calculate_sample_weight_default,
-    'sample_uniform': calculate_sample_weight_uniform,
-    'rtuning_r': calculate_sample_weight_uniform,
-    'sample_weighted_reverse': calculate_sample_weight_reverse,
-    'sample_weighted_reverse_noinit': calculate_sample_weight_reverse,
-    'sample_weighted_reverse_idkonly': calculate_sample_weight_reverse_idkonly,
-    'sample_weighted_reverse_ridk': calculate_sample_weight_reverse_ridk,
-    'sample_weight_reverse_smooth': calculate_sample_weight_reverse_smooth,
-    'sample_weight_smooth': calculate_sample_weight_smooth,
-    'popular': calculate_sample_weight_popular
+    'sft': weight_sft,                                              # SFT
+    'popular': weight_popular,                                      # FT-TOP
+    'rtuning_r': weight_uniform,                                    # R-Tuning (greedy EM knowledge)
+    'sample_uniform': weight_uniform,                               # KWT-U
+    'sample_weight_reverse_smooth': weight_familiarity,             # KWT (F, default)
+    'sample_weight_smooth': weight_reverse_familiarity,             # KWT-RF
+    'sample_weighted_reverse_ridk': weight_familiarity_prepend_idk, # KWT (prepend-IDK)
+    'sample_weighted_reverse_idkonly': weight_familiarity_only_idk, # KWT (only-IDK)
 }
 
 
-def load_data(filepath, sft_idk_weight=0.1, weight_strategy='default'):
-    """
-    Load and prepare training data with configurable sample weighting.
-
-    Args:
-        filepath: Path to the JSON file containing training data
-        sft_idk_weight: Weight for IDK cases (samples_correct = 0)
-        weight_strategy: Strategy for calculating sample weights. Options:
-            - 'default': Higher weight for harder questions (1.2 - accuracy)
-            - 'uniform': Equal weight for all samples (1.0)
-
-    Returns:
-        list: List of processed data items with weights
-    """
+def load_data(filepath, sft_idk_weight=0.1, weight_strategy='sample_weight_reverse_smooth'):
+    """Load a judged knowledge-estimation file and attach per-sample weights."""
     with open(filepath, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
@@ -234,7 +144,7 @@ def load_data(filepath, sft_idk_weight=0.1, weight_strategy='default'):
     return data_type
 
 ######################################
-# 2) 프롬프트/토크나이즈
+# 2) Prompt / tokenization
 ######################################
 def create_prompt(question):
     return f"Question: {question}\n\nAnswer:"
@@ -271,7 +181,7 @@ def preprocess_tokenize(item, tokenizer, max_length=1024):
     return ex
 
 ######################################
-# 3) Collator: 배치 패딩 처리
+# 3) Collator
 ######################################
 @dataclass
 class SampleWeightedCollator:
@@ -338,7 +248,7 @@ class SampleWeightedCollator:
         return torch.tensor(out, dtype=torch.long)
     
 ######################################
-# 4) 커스텀 Trainer
+# 4) Trainer
 ######################################
 class SampleWeightedTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
@@ -376,8 +286,6 @@ class SampleWeightedTrainer(Trainer):
 
 
 def main(args):
-    # Determine weight strategy from save_run_name
-    # Initialize wandb
     wandb_run_name = f"{args.dataname}_{args.save_run_name}-ep{args.epochs}_idk{args.sft_idk_weight}"
     wandb.init(
         project=args.wandb_project,
@@ -398,7 +306,7 @@ def main(args):
     model_path = args.model_path
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token  # 안전하게 eos를 pad로 사용
+        tokenizer.pad_token = tokenizer.eos_token
         print("Set: tokenizer padding")
 
     # Add <IDK> special token
@@ -414,29 +322,14 @@ def main(args):
     # Resize model embeddings to accommodate new token
     model.resize_token_embeddings(len(tokenizer))
 
-    # sample_weighted_reverse_noinit 세팅에선 초기화 안함
-    if args.save_run_name != "sample_weighted_reverse_noinit":
-        # Initialize <IDK> token embedding with average of "I don't know"
-        idk_text = "I don't know"
-        idk_tokens = tokenizer(idk_text, return_tensors="pt", add_special_tokens=False)
-
-        with torch.no_grad():
-            # Get input embeddings
-            input_embeddings = model.get_input_embeddings()
-
-            # Get embeddings for "I don't know" tokens
-            idk_embeddings = input_embeddings(idk_tokens['input_ids'][0].to(model.device))
-
-            # Calculate mean embedding
-            mean_embedding = idk_embeddings.mean(dim=0)
-
-            # Get the token ID for <IDK>
-            idk_token_id = tokenizer.convert_tokens_to_ids(special_token)
-
-            # Initialize <IDK> token embedding with the mean
-            input_embeddings.weight[idk_token_id] = mean_embedding
-
-        print("Initialized <IDK> token embedding with average of 'I don't know'")
+    # Initialize <IDK> token embedding with the mean embedding of "I don't know"
+    idk_tokens = tokenizer("I don't know", return_tensors="pt", add_special_tokens=False)
+    with torch.no_grad():
+        input_embeddings = model.get_input_embeddings()
+        idk_embeddings = input_embeddings(idk_tokens['input_ids'][0].to(model.device))
+        idk_token_id = tokenizer.convert_tokens_to_ids(special_token)
+        input_embeddings.weight[idk_token_id] = idk_embeddings.mean(dim=0)
+    print("Initialized <IDK> token embedding with average of 'I don't know'")
 
     # Enable gradient checkpointing for memory efficiency
     model.gradient_checkpointing_enable()
@@ -464,14 +357,12 @@ def main(args):
         learning_rate=args.lr,
         warmup_ratio=0.03,
         weight_decay=0.01,
-        logging_steps= args.logging_steps,
-        # save_steps= args.save_steps,
-        save_strategy="no", 
-        save_total_limit=2,
-        bf16=torch.cuda.is_available(),  # A100/H100면 bf16, 아니면 자동으로 fp32 사용
-        remove_unused_columns=False,     # collator가 dict 구조를 유지하도록
+        logging_steps=args.logging_steps,
+        save_strategy="no",
+        bf16=torch.cuda.is_available(),
+        remove_unused_columns=False,     # keep the nested dict produced by the collator
         report_to="wandb",
-    )    
+    )
 
     trainer = SampleWeightedTrainer(
         model=model,
@@ -483,55 +374,46 @@ def main(args):
     trainer.train()
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
-    print("Training finished.")    
+    print("Training finished.")
 
 if __name__ == "__main__":
-    # python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 0.1 --save_run_name sample_weighted --eval_method rouge --threshold 0.6
-    # python3 train_sample.py --dataname medqa --epochs 3 --sft_idk_weight 0.1 --save_run_name sample_weighted --eval_method rouge --threshold 0.6
-    # python3 train_sample.py --dataname sciq --epochs 3 --sft_idk_weight 0.1 --save_run_name sample_weighted --eval_method rouge --threshold 0.6
-    # python3 train_sample.py --dataname halueval --epochs 3 --sft_idk_weight 0.1 --save_run_name sample_weighted_reverse_idkonly --eval_method rouge --threshold 0.6
-    parser = argparse.ArgumentParser(description='Train model with sample-weighted SFT')
-    parser.add_argument('--dataname', type=str, required=True, help='Dataset name (e.g., halueval, medqa)')
-    parser.add_argument('--eval_method', type=str, default="rouge")
-    parser.add_argument('--model_path', type=str, default="../../model/Llama-3.2-3B")
-    parser.add_argument('--max_length', type=int, default=1024)
-    parser.add_argument('--threshold', type=str, default="None",
-                       help='Threshold for bertscore/rouge (default: 0.7 for bertscore, 0.6 for rouge)')
+    parser = argparse.ArgumentParser(description='Knowledge-weighted fine-tuning (KWT) and baselines')
+    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa', 'sciq'])
+    parser.add_argument('--model_path', type=str, default="meta-llama/Llama-3.2-3B")
+    parser.add_argument('--save_run_name', type=str, default="sample_weight_reverse_smooth",
+                        choices=list(SAMPLE_WEIGHT_STRATEGIES.keys()),
+                        help='Training strategy (see SAMPLE_WEIGHT_STRATEGIES)')
+    parser.add_argument('--eval_method', type=str, default="llm", choices=['llm', 'rouge', 'em'],
+                        help='Matching function used to compute the knowledge score')
+    parser.add_argument('--threshold', type=str, default=None,
+                        help='ROUGE-L threshold (default: 0.35 for halueval, 0.6 for medqa/sciq)')
+    parser.add_argument('--sft_idk_weight', type=float, default=0.16,
+                        help='Weight of unknown (KS=0) samples for sample_uniform / rtuning_r. '
+                             'Other strategies ignore it, but it is kept in the output name.')
+    parser.add_argument('--run_id', type=int, default=0, help='Run ID for repeated SFT runs (0 means no suffix)')
+    parser.add_argument('--ckpt_root', type=str, default=str(CKPT_DIR), help='Root directory for checkpoints')
 
+    parser.add_argument('--max_length', type=int, default=1024)
     parser.add_argument('--epochs', type=int, default=3)
     parser.add_argument('--batch_size', type=int, default=4)
     parser.add_argument('--grad_accum', type=int, default=8)
     parser.add_argument('--lr', type=float, default=2e-5)
-
     parser.add_argument('--logging_steps', type=int, default=10)
-
-    # Sample weight for IDK cases
-    parser.add_argument('--sft_idk_weight', type=float, default=0.1, help='Weight for samples with no correct answers (IDK cases)')
-
-    # Wandb configuration
-    parser.add_argument('--wandb_project', type=str, default="hall-data-cur", help='WandB project name')
-    parser.add_argument('--save_run_name', type=str, default="sample_weighted", help='WandB run name (optional)') # sample_weighted / sample_uniform / rtuning_r
-    parser.add_argument('--run_id', type=int, default=0, help='Run ID for multiple runs (0 means no suffix)')
+    parser.add_argument('--wandb_project', type=str, default="kwt", help='WandB project name')
 
     args = parser.parse_args()
 
-    # Set train_data_path and output_dir based on dataname    
-    if args.eval_method in ["llm", "em"]:
-        args.threshold = ""
-    else:
-        args.threshold = float(args.threshold)
-
     model_name = get_model_name(args.model_path)
     if args.save_run_name == "rtuning_r":
-        args.train_data_path = f"../dataset_type/{args.dataname}/{model_name}/base_model_greedy_samples_fewshot3_evaluated_em.json"
-        args.output_dir = f"/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{model_name}/{args.save_run_name}/sw_{args.eval_method}{args.threshold}_idk{args.sft_idk_weight}"
-    elif args.save_run_name == "sft":
-        args.train_data_path = f"../dataset_type/{args.dataname}/{model_name}/base_model_temp0.7_samples5_fewshot3_evaluated_llm.json"
-        run_suffix = f"_run{args.run_id}" if args.run_id > 0 else ""
-        args.output_dir = f"/mnt/ddn/rungjoo/hall/halu_model/{args.dataname}/{model_name}/{args.save_run_name}/sft{run_suffix}"
+        # R-Tuning: binary known/unknown from a single greedy response, judged by EM
+        args.eval_method = "em"
+        args.threshold = ""
+        args.train_data_path = str(knowledge_file(args.dataname, model_name, "em", greedy=True))
     else:
-        args.train_data_path = f"../dataset_type/{args.dataname}/{model_name}/base_model_temp0.7_samples5_fewshot3_evaluated_{args.eval_method}{args.threshold}.json"
-        args.output_dir = f"/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{model_name}/{args.save_run_name}/sw_{args.eval_method}{args.threshold}_idk{args.sft_idk_weight}"
+        args.threshold = resolve_threshold(args.dataname, args.eval_method, args.threshold)
+        args.train_data_path = str(knowledge_file(args.dataname, model_name, args.eval_method, args.threshold))
+    args.output_dir = str(checkpoint_dir(args.ckpt_root, args.dataname, model_name, args.save_run_name,
+                                         args.eval_method, args.threshold, args.sft_idk_weight, args.run_id))
 
     print(f"Dataset: {args.dataname}")
     print(f"Train data path: {args.train_data_path}")

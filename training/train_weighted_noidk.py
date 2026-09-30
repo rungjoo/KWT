@@ -1,8 +1,6 @@
-import os
+import sys
 import torch
 import json
-import math
-import copy, random
 import argparse
 import wandb
 from pathlib import Path
@@ -18,12 +16,11 @@ from typing import Dict, List, Any
 import warnings
 warnings.filterwarnings("ignore")
 
-def get_model_name(model_path):
-    """Extract model name from model path for directory naming"""
-    return Path(model_path).name.lower()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from paths import CKPT_DIR, get_model_name, resolve_threshold, knowledge_file, checkpoint_dir
 
 ######################################
-# 1) 데이터 로딩
+# 1) Data loading
 ######################################
 
 def calculate_sample_weight_reverse_smooth(samples_correct, samples_total, sft_idk_weight):
@@ -90,7 +87,7 @@ def load_data(filepath, sft_idk_weight=0.1, weight_strategy='sample_weight_rever
     return data_type
 
 ######################################
-# 2) 프롬프트/토크나이즈
+# 2) Prompt / tokenization
 ######################################
 def create_prompt(question):
     return f"Question: {question}\n\nAnswer:"
@@ -125,7 +122,7 @@ def preprocess_tokenize(item, tokenizer, max_length=1024):
     return ex
 
 ######################################
-# 3) Collator: 배치 패딩 처리
+# 3) Collator
 ######################################
 @dataclass
 class SampleWeightedCollator:
@@ -171,7 +168,7 @@ class SampleWeightedCollator:
         return torch.tensor(out, dtype=torch.long)
 
 ######################################
-# 4) 커스텀 Trainer
+# 4) Trainer
 ######################################
 class SampleWeightedTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
@@ -250,9 +247,8 @@ def main(args):
         learning_rate=args.lr,
         warmup_ratio=0.03,
         weight_decay=0.01,
-        logging_steps= args.logging_steps,
+        logging_steps=args.logging_steps,
         save_strategy="no",
-        save_total_limit=2,
         bf16=torch.cuda.is_available(),
         remove_unused_columns=False,
         report_to="wandb",
@@ -271,40 +267,35 @@ def main(args):
     print("Training finished.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Train model with sample-weighted SFT (no IDK)')
-    parser.add_argument('--dataname', type=str, required=True, help='Dataset name (e.g., halueval, medqa)')
-    parser.add_argument('--eval_method', type=str, default="llm")
-    parser.add_argument('--model_path', type=str, default="../../model/Llama-3.2-3B")
-    parser.add_argument('--max_length', type=int, default=1024)
-    parser.add_argument('--threshold', type=str, default="None",
-                       help='Threshold for bertscore/rouge (default: 0.7 for bertscore, 0.6 for rouge)')
+    parser = argparse.ArgumentParser(description='KWT (non-IDK): knowledge-weighted SFT without <IDK> supervision')
+    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa', 'sciq'])
+    parser.add_argument('--model_path', type=str, default="meta-llama/Llama-3.2-3B")
+    parser.add_argument('--save_run_name', type=str, default="sample_weight_reverse_smooth",
+                        choices=list(SAMPLE_WEIGHT_STRATEGIES.keys()),
+                        help='Weight strategy: sample_weight_reverse_smooth (F) / sample_weight_smooth (RF) / sample_uniform (U)')
+    parser.add_argument('--eval_method', type=str, default="llm", choices=['llm', 'rouge', 'em'])
+    parser.add_argument('--threshold', type=str, default=None,
+                        help='ROUGE-L threshold (default: 0.35 for halueval, 0.6 for medqa/sciq)')
+    parser.add_argument('--sft_idk_weight', type=float, default=0.16,
+                        help='Weight of KS=0 samples for sample_uniform (kept in the output name)')
+    parser.add_argument('--ckpt_root', type=str, default=str(CKPT_DIR), help='Root directory for checkpoints')
 
+    parser.add_argument('--max_length', type=int, default=1024)
     parser.add_argument('--epochs', type=int, default=3)
     parser.add_argument('--batch_size', type=int, default=4)
     parser.add_argument('--grad_accum', type=int, default=8)
     parser.add_argument('--lr', type=float, default=2e-5)
-
     parser.add_argument('--logging_steps', type=int, default=10)
-
-    # Sample weight for IDK cases (accepted for compatibility, not used)
-    parser.add_argument('--sft_idk_weight', type=float, default=0.1, help='Weight for samples with no correct answers')
-
-    # Wandb configuration
-    parser.add_argument('--wandb_project', type=str, default="hall-data-cur", help='WandB project name')
-    parser.add_argument('--save_run_name', type=str, default="sample_weight_reverse_smooth",
-                       help='Weight strategy: sample_weight_reverse_smooth / sample_weight_smooth / sample_uniform')
+    parser.add_argument('--wandb_project', type=str, default="kwt", help='WandB project name')
 
     args = parser.parse_args()
 
-    # Set train_data_path and output_dir based on dataname
-    if args.eval_method in ["llm", "em"]:
-        args.threshold = ""
-    else:
-        args.threshold = float(args.threshold)
-
     model_name = get_model_name(args.model_path)
-    args.train_data_path = f"../dataset_type/{args.dataname}/{model_name}/base_model_temp0.7_samples5_fewshot3_evaluated_{args.eval_method}{args.threshold}.json"
-    args.output_dir = f"/mnt/ddn/rungjoo/hall/halu_model/{args.dataname}/{model_name}/{args.save_run_name}_noidk/sw_{args.eval_method}{args.threshold}_idk{args.sft_idk_weight}"
+    args.threshold = resolve_threshold(args.dataname, args.eval_method, args.threshold)
+    args.train_data_path = str(knowledge_file(args.dataname, model_name, args.eval_method, args.threshold))
+    # saved as "<save_run_name>_noidk" (evaluate with --save_run_name <save_run_name>_noidk)
+    args.output_dir = str(checkpoint_dir(args.ckpt_root, args.dataname, model_name, f"{args.save_run_name}_noidk",
+                                         args.eval_method, args.threshold, args.sft_idk_weight))
 
     print(f"Dataset: {args.dataname}")
     print(f"Train data path: {args.train_data_path}")

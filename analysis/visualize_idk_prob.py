@@ -1,7 +1,18 @@
+"""Plot the <IDK> token probability over relative response positions (paper Figures 2 and 3).
+
+Input: *_prob.jsonl files produced by run_idk_prob.py.
+    python visualize_idk_prob.py --run_stem sample_weight_reverse_smooth_llm_idk0.16    # append-IDK
+    python visualize_idk_prob.py --run_stem sample_weighted_reverse_ridk_llm_idk0.16    # prepend-IDK
+"""
+import sys
 import json
+import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from paths import RESULT_DIR
 
 def load_results(file_path):
     data = []
@@ -90,7 +101,7 @@ def normalize_sequences_no_interp(sequences, num_bins=5):
 
     return mean, std, len(normalized)
 
-def plot_idk_probability_comparison(dataname, idk_generated, idk_not_generated, output_dir, num_bins=5):
+def plot_idk_probability_comparison(dataname, idk_generated, idk_not_generated, output_dir, num_bins=5, run_stem="kwt"):
     """
     Plot IDK probability changes comparing <IDK> generated vs not generated cases.
     Only shows Position in Response plot (excludes last token/EOS).
@@ -102,9 +113,9 @@ def plot_idk_probability_comparison(dataname, idk_generated, idk_not_generated, 
     # Create figure - single plot
     fig, ax = plt.subplots(figsize=(8, 6))
 
-    # X-axis: categorical labels for 3 bins
-    x_labels = ['Early', 'Mid', 'Late']
-    x = np.arange(num_bins)  # [0, 1, 2]
+    # X-axis: categorical position bins
+    x_labels = ['Early', 'Mid', 'Late'] if num_bins == 3 else [str(i + 1) for i in range(num_bins)]
+    x = np.arange(num_bins)
 
     if idk_count > 0:
         ax.plot(x, idk_mean, 'r-o', linewidth=2, markersize=10, label='<IDK> Generated')
@@ -132,7 +143,7 @@ def plot_idk_probability_comparison(dataname, idk_generated, idk_not_generated, 
     plt.tight_layout()
 
     # Save figure
-    output_path = Path(output_dir) / f'kwt_ridk_{dataname}_idk_prob_sequence_no_interp.png'
+    output_path = Path(output_dir) / f'{run_stem}_{dataname}_idk_prob_sequence.png'
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
 
@@ -151,39 +162,29 @@ def plot_idk_probability_comparison(dataname, idk_generated, idk_not_generated, 
     }
 
 def main():
-    num_bins = 3  # Early, Mid, Late
+    parser = argparse.ArgumentParser(description='Plot <IDK> probability over response positions')
+    parser.add_argument('--run_stem', type=str, default='sample_weight_reverse_smooth_llm_idk0.16',
+                        help='Stem of the *_prob.jsonl files (without _prob.jsonl)')
+    parser.add_argument('--model_name', type=str, default='llama-3.2-3b')
+    parser.add_argument('--datanames', type=str, nargs='+', default=['halueval', 'medqa', 'sciq'])
+    parser.add_argument('--num_bins', type=int, default=3, help='Number of position bins (Early / Mid / Late)')
+    parser.add_argument('--output_dir', type=str, default=str(RESULT_DIR / 'idk_prob_visualization'))
+    args = parser.parse_args()
+
+    num_bins = args.num_bins
     min_length = num_bins  # Minimum sequence length = num_bins
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
-    # Define datasets and their file paths
-    # datasets = {
-    #     'halueval': 'halueval/llama-3.2-3b/sample_weight_reverse_smooth_llm_idk0.16_prob.jsonl',
-    #     'medqa': 'medqa/llama-3.2-3b/sample_weight_reverse_smooth_llm_idk0.16_prob.jsonl',
-    #     'sciq': 'sciq/llama-3.2-3b/sample_weight_reverse_smooth_llm_idk0.16_prob.jsonl'
-    # }
-    # datasets = {
-    #     'halueval': 'halueval/llama-3.2-3b/seal_prob.jsonl',
-    #     'medqa': 'medqa/llama-3.2-3b/seal_prob.jsonl',
-    #     'sciq': 'sciq/llama-3.2-3b/seal_prob.jsonl'
-    # }  
-    datasets = {
-        'halueval': 'halueval/llama-3.2-3b/sample_weighted_reverse_ridk_llm_idk0.16_prob.jsonl',
-        'medqa': 'medqa/llama-3.2-3b/sample_weighted_reverse_ridk_llm_idk0.16_prob.jsonl',
-        'sciq': 'sciq/llama-3.2-3b/sample_weighted_reverse_ridk_llm_idk0.16_prob.jsonl'
-    }       
-
-    output_dir = 'idk_prob_visualization'
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-
-    for dataname, filepath in datasets.items():
+    for dataname in args.datanames:
+        filepath = RESULT_DIR / dataname / args.model_name / f"{args.run_stem}_prob.jsonl"
         print(f"\n{'='*50}")
         print(f"Processing {dataname}...")
         print('='*50)
 
-        if not Path(filepath).exists():
+        if not filepath.exists():
             print(f"  File not found: {filepath}")
             continue
 
-        # Load data
         data = load_results(filepath)
         print(f"  Loaded {len(data)} samples")
 
@@ -191,8 +192,8 @@ def main():
         idk_generated, idk_not_generated, skipped = analyze_idk_probability_sequence(data, min_length)
         print(f"  Skipped {skipped} samples with length < {min_length}")
 
-        # Plot
-        plot_idk_probability_comparison(dataname, idk_generated, idk_not_generated, output_dir, num_bins)
+        plot_idk_probability_comparison(dataname, idk_generated, idk_not_generated, args.output_dir,
+                                        num_bins, run_stem=args.run_stem)
 
 if __name__ == "__main__":
     main()

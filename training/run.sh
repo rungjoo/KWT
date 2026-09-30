@@ -1,109 +1,41 @@
 #!/bin/bash
 # =============================================================================
-# Training Scripts - All Training Commands
+# Step 2. Fine-tuning (paper Sec. 3.2 / 4.4, Appendix C-D)
 # =============================================================================
-# Usage: Uncomment the commands you want to run
-
-# Base model path
-BASE_MODEL="../../model/Llama-3.2-3B"
-# BASE_MODEL="../../model/Qwen2.5-3B"
-
+# Requires the judged knowledge files from inference/run.sh.
+# Checkpoints are written to checkpoints/<dataset>/<model>/<run_name>/... (see paths.py);
+# pass --ckpt_root to store them elsewhere.
+#
+# Usage:  bash training/run.sh
+#         BASE_MODEL=Qwen/Qwen2.5-3B bash training/run.sh
 # =============================================================================
-# 1. Basic SFT Training (train_sft.py)
-# =============================================================================
-# Standard supervised fine-tuning
+set -e
+cd "$(dirname "$0")"
 
-# HaluEval
-# python train_sft.py \
-#     --model_path $BASE_MODEL \
-#     --dataname halueval \
-#     --output_dir halueval/llama-3.2-3b/sft
+BASE_MODEL=${BASE_MODEL:-meta-llama/Llama-3.2-3B}
 
-# MedQA
-# python train_sft.py \
-#     --model_path $BASE_MODEL \
-#     --dataname medqa \
-#     --output_dir medqa/llama-3.2-3b/sft
+for DS in halueval medqa sciq; do
+    COMMON="--dataname $DS --model_path $BASE_MODEL"
 
-# SciQ
-# python train_sft.py \
-#     --model_path $BASE_MODEL \
-#     --dataname sciq \
-#     --output_dir sciq/llama-3.2-3b/sft
+    # --- KWT (familiarity weighting + append-IDK) with each matching function (Tables 5-7)
+    python train_weighted.py $COMMON --save_run_name sample_weight_reverse_smooth --eval_method llm   --sft_idk_weight 0.16
+    python train_weighted.py $COMMON --save_run_name sample_weight_reverse_smooth --eval_method rouge --sft_idk_weight 0.16
+    python train_weighted.py $COMMON --save_run_name sample_weight_reverse_smooth --eval_method em    --sft_idk_weight 0.16
 
-# =============================================================================
-# 2. Weighted Training with IDK (train_weighted.py)
-# =============================================================================
-# Sample-weighted training with IDK token
+    # --- Baselines (Sec. 4.4)
+    python train_weighted.py $COMMON --save_run_name sft       --sft_idk_weight 0.0   # SFT
+    python train_weighted.py $COMMON --save_run_name popular   --sft_idk_weight 0.0   # FT-TOP
+    python train_weighted.py $COMMON --save_run_name rtuning_r --sft_idk_weight 1.0   # R-Tuning (greedy + EM)
+    python train_seal.py     $COMMON                                                  # SEAL
 
-# HaluEval
-# python train_weighted.py \
-#     --model_path $BASE_MODEL \
-#     --dataname halueval \
-#     --sft_idk_weight 0.16 \
-#     --save_run_name sample_weight_reverse_smooth
+    # --- Weighting strategies (Sec. 4.8, Table 9)
+    python train_weighted.py $COMMON --save_run_name sample_weight_smooth --eval_method llm --sft_idk_weight 1.0   # KWT-RF
+    python train_weighted.py $COMMON --save_run_name sample_uniform       --eval_method llm --sft_idk_weight 1.0   # KWT-U
 
-# MedQA
-# python train_weighted.py \
-#     --model_path $BASE_MODEL \
-#     --dataname medqa \
-#     --sft_idk_weight 0.16 \
-#     --save_run_name sample_weight_reverse_smooth
+    # --- Position of <IDK> (Sec. 5.4, Appendix D, Table 16)
+    python train_weighted.py $COMMON --save_run_name sample_weighted_reverse_ridk    --eval_method llm --sft_idk_weight 0.16  # prepend-IDK
+    python train_weighted.py $COMMON --save_run_name sample_weighted_reverse_idkonly --eval_method llm --sft_idk_weight 0.16  # only-IDK
 
-# SciQ
-# python train_weighted.py \
-#     --model_path $BASE_MODEL \
-#     --dataname sciq \
-#     --sft_idk_weight 0.16 \
-#     --save_run_name sample_weight_reverse_smooth
-
-# =============================================================================
-# 3. Weighted Training without IDK (train_weighted_noidk.py)
-# =============================================================================
-# Sample-weighted training without IDK token
-
-# Weight strategies: reverse_smooth, smooth, uniform
-
-# HaluEval
-# python train_weighted_noidk.py \
-#     --model_path $BASE_MODEL \
-#     --dataname halueval \
-#     --weight_strategy reverse_smooth \
-#     --save_run_name sample_weight_reverse_smooth_noidk
-
-# MedQA
-# python train_weighted_noidk.py \
-#     --model_path $BASE_MODEL \
-#     --dataname medqa \
-#     --weight_strategy reverse_smooth \
-#     --save_run_name sample_weight_reverse_smooth_noidk
-
-# SciQ
-# python train_weighted_noidk.py \
-#     --model_path $BASE_MODEL \
-#     --dataname sciq \
-#     --weight_strategy reverse_smooth \
-#     --save_run_name sample_weight_reverse_smooth_noidk
-
-# =============================================================================
-# 4. SEAL Training (train_seal.py)
-# =============================================================================
-# Self-Aware Learning method
-
-# HaluEval
-# python train_seal.py \
-#     --model_path $BASE_MODEL \
-#     --dataname halueval \
-#     --save_run_name seal
-
-# MedQA
-# python train_seal.py \
-#     --model_path $BASE_MODEL \
-#     --dataname medqa \
-#     --save_run_name seal
-
-# SciQ
-# python train_seal.py \
-#     --model_path $BASE_MODEL \
-#     --dataname sciq \
-#     --save_run_name seal
+    # --- KWT without <IDK> supervision (Sec. 5.3, Table 11)
+    python train_weighted_noidk.py $COMMON --save_run_name sample_weight_reverse_smooth --eval_method llm --sft_idk_weight 0.16
+done

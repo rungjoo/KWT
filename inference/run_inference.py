@@ -1,3 +1,10 @@
+"""Knowledge estimation step 1: multi-sampled few-shot inference with the base model.
+
+For every question, S responses are sampled, each with independently resampled
+3-shot demonstrations (paper Sec. 3.1). With --greedy, a single greedy response is
+generated instead (used to build R-Tuning's known/unknown split).
+"""
+import sys
 import json
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -6,9 +13,8 @@ import argparse
 from pathlib import Path
 import random
 
-def get_model_name(model_path):
-    """Extract model name from model path for directory naming"""
-    return Path(model_path).name.lower()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from paths import KNOWLEDGE_DIR, get_model_name, split_file, KNOWLEDGE_FILE_PREFIX, GREEDY_FILE_PREFIX
 
 def load_dataset(file_path):
     data = []
@@ -205,65 +211,46 @@ def save_results(results, output_path):
     print(f"Results saved to {output_path}")
 
 def main():
-    # python3 01_inference_models.py --dataname halueval --temperature 0.7 --num_samples 5 --split test
-    # python3 01_inference_models.py --dataname medqa --base_model ../../model/Qwen3-4B --temperature 0.7 --num_samples 5
-    # python3 01_inference_models.py --dataname sciq --base_model ../../model/Qwen3-4B --temperature 0.7 --num_samples 5
-    parser = argparse.ArgumentParser(description='Inference on train.jsonl using base model with sampling')
-    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa', 'sciq'], help='Dataset name (halueval, medqa, or sciq)')
-    parser.add_argument('--base_model', type=str, default='../../model/Llama-3.2-3B', help='Path to base model') # Llama-3.2-3B
-    parser.add_argument('--device', type=str, default='cuda', help='Device to use')
-    parser.add_argument('--fewshot', type=int, default=3, help='The number of fewshot samples')
-    parser.add_argument('--temperature', type=float, default=0.7, help='Temperature for sampling (default: 0.7)')
-    parser.add_argument('--num_samples', type=int, default=5, help='Number of samples to generate per question (default: 5)')
-    parser.add_argument('--split', type=str, default='train', choices=['train', 'test'], help='Dataset split to use (train or test)')
+    parser = argparse.ArgumentParser(description='Multi-sampled few-shot inference with the base model')
+    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa', 'sciq'])
+    parser.add_argument('--base_model', type=str, default='meta-llama/Llama-3.2-3B', help='Path or HF id of the base model')
+    parser.add_argument('--split', type=str, default='train', choices=['train', 'test'],
+                        help='train: knowledge scores for fine-tuning; test: knowledge scores for analysis (Fig. 1)')
+    parser.add_argument('--device', type=str, default='cuda')
+    parser.add_argument('--fewshot', type=int, default=3, help='Number of few-shot demonstrations')
+    parser.add_argument('--temperature', type=float, default=0.7)
+    parser.add_argument('--num_samples', type=int, default=5, help='Number of sampled responses per question (S)')
+    parser.add_argument('--greedy', action='store_true', help='Single greedy response (for R-Tuning)')
+    parser.add_argument('--seed', type=int, default=None)
 
     args = parser.parse_args()
+    if args.seed is not None:
+        random.seed(args.seed)
+        torch.manual_seed(args.seed)
 
-    # Extract model name for directory structure
     model_name = get_model_name(args.base_model)
+    data_path = split_file(args.dataname, args.split)
+    output_dir = KNOWLEDGE_DIR / args.dataname / model_name
+    if args.split != 'train':
+        output_dir = output_dir / args.split
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Set data_path and output_dir based on dataname, model, and split
-    if args.dataname == 'halueval':
-        args.data_path = f'../dataset/halueval/halueval_{args.split}.jsonl'
-        args.output_dir = f'./halueval/{model_name}' if args.split == 'train' else f'./halueval/{model_name}/{args.split}'
-    elif args.dataname == 'medqa':
-        args.data_path = f'../dataset/medqa/{args.split}.jsonl'
-        args.output_dir = f'./medqa/{model_name}' if args.split == 'train' else f'./medqa/{model_name}/{args.split}'
-    elif args.dataname == 'sciq':
-        args.data_path = f'../dataset/sciq/{args.split}.jsonl'
-        args.output_dir = f'./sciq/{model_name}' if args.split == 'train' else f'./sciq/{model_name}/{args.split}'
+    data = load_dataset(data_path)
+    print(f"Loaded {len(data)} examples from {data_path}")
 
-    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    if args.greedy:
+        print("\n=== Running Base Model (Few-shot with Greedy) ===")
+        results = inference_greedy_base_model(args.base_model, data, fewshot=args.fewshot,
+                                              num_samples=1, device=args.device)
+        output_file = output_dir / f"{GREEDY_FILE_PREFIX}.jsonl"
+    else:
+        print("\n=== Running Base Model (Few-shot with Sampling) ===")
+        print(f"Temperature: {args.temperature}, Num Samples: {args.num_samples}, Few-shot: {args.fewshot}")
+        results = inference_base_model(args.base_model, data, fewshot=args.fewshot, temperature=args.temperature,
+                                       num_samples=args.num_samples, device=args.device)
+        output_file = output_dir / f"base_model_temp{args.temperature}_samples{args.num_samples}_fewshot{args.fewshot}.jsonl"
 
-    data = load_dataset(args.data_path)
-    print(f"Loaded {len(data)} examples from {args.data_path}")
-
-    print("\n=== Running Base Model (Few-shot with Sampling) ===")
-    print(f"Temperature: {args.temperature}, Num Samples: {args.num_samples}, Few-shot: {args.fewshot}")
-    base_results = inference_base_model(
-        args.base_model,
-        data,
-        fewshot=args.fewshot,
-        temperature=args.temperature,
-        num_samples=args.num_samples,
-        device=args.device
-    )
-
-    output_filename = f"base_model_temp{args.temperature}_samples{args.num_samples}_fewshot{args.fewshot}.jsonl"
-    save_results(base_results, f"{args.output_dir}/{output_filename}")
-
-    # print("\n=== Running Base Model (Few-shot with Greedy) ===")
-    # base_greedy_results = inference_greedy_base_model(
-    #     args.base_model,
-    #     data,
-    #     fewshot=args.fewshot,
-    #     num_samples=args.num_samples,
-    #     device=args.device
-    # )
-
-    # output_filename = f"base_model_greedy_samples_fewshot{args.fewshot}.jsonl"
-    # save_results(base_greedy_results, f"{args.output_dir}/{output_filename}")
-
+    save_results(results, output_file)
     print("\nInference completed!")
 
 if __name__ == "__main__":

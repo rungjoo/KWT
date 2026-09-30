@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
+"""Knowledge estimation step 2: judge every sampled response against the gold answer
+with EM, ROUGE-L or LLM-as-a-judge. The per-question count of correct samples
+(samples_correct / samples_total) is the knowledge score used for fine-tuning."""
 import json
 import argparse
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
 import os, re
-from bert_score import score as bert_score
 from rouge_score import rouge_scorer
 
 def load_model(model_path):
@@ -23,9 +25,9 @@ def load_model(model_path):
     return model, tokenizer
 
 def normalize_text(text: str) -> str:
-    """간단한 문자열 정규화: 소문자 변환, 앞뒤 공백 제거, 다중 공백 축소"""
+    """Simple text normalization: lowercase, strip whitespace, collapse multiple spaces"""
     text = text.lower().strip()
-    text = re.sub(r"\s+", " ", text)  # 여러 공백을 하나로
+    text = re.sub(r"\s+", " ", text)
     return text
 
 def evaluate_answer_llm(model, tokenizer, question, knowledge, right_answer, model_answer):
@@ -77,22 +79,6 @@ Answer only 'yes' or 'no':"""
         print(f"  Warning: Unclear evaluation response: {response}")
         return False, 0.0
 
-def evaluate_answer_bertscore(right_answer, model_answer, threshold=0.85):
-    """Use BERTScore to evaluate if model_answer matches right_answer"""
-    right_answer = normalize_text(right_answer)
-    model_answer = normalize_text(model_answer)
-
-    if right_answer == model_answer:
-        return True, 1.0
-
-    # Calculate BERTScore with GPU support
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    P, R, F1 = bert_score([model_answer], [right_answer], lang='en', verbose=False, device=device)
-    f1_score = F1.item()
-
-    is_match = f1_score >= threshold
-    return is_match, f1_score
-
 def evaluate_answer_rouge(right_answer, model_answer, threshold=0.5):
     """Use ROUGE score to evaluate if model_answer matches right_answer"""
     right_answer = normalize_text(right_answer)
@@ -128,21 +114,17 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
         file_path: Path to the JSONL file
         model: Model for LLM evaluation (None if not using llm method)
         tokenizer: Tokenizer for LLM evaluation (None if not using llm method)
-        eval_method: Evaluation method ('llm', 'bertscore', 'rouge', 'em')
-        threshold: Threshold for bertscore/rouge (default: 0.7 for bertscore, 0.6 for rouge, not used for em)
+        eval_method: Evaluation method ('llm', 'rouge', 'em')
+        threshold: ROUGE-L threshold (not used for llm/em)
     """
 
     print(f"\nProcessing file: {file_path}")
     print(f"Evaluation method: {eval_method}")
 
-    # Set default threshold based on method
-    if threshold is None:
-        if eval_method == 'bertscore':
-            threshold = 0.7
-        elif eval_method == 'rouge':
-            threshold = 0.35
+    if eval_method == 'rouge' and threshold is None:
+        threshold = 0.35
 
-    if eval_method in ['bertscore', 'rouge'] and threshold is not None:
+    if eval_method == 'rouge':
         print(f"Threshold: {threshold}")
 
     # Load JSONL data
@@ -153,16 +135,12 @@ def process_results_file(file_path, model, tokenizer, eval_method='llm', thresho
             if line:
                 data.append(json.loads(line))
 
-    # Check if data has the new format (with 'samples' field)
-    has_samples = data and 'samples' in data[0]
-    if has_samples:
-        print(f"Detected new format with multiple samples per question")
-        return process_samples_format(data, model, tokenizer, eval_method, threshold, file_path)
-    else:
-        print(f"Detected old format with single answer per question")
+    if not (data and 'samples' in data[0]):
+        raise ValueError(f"{file_path} is not an output of run_inference.py (missing 'samples' field)")
+    return process_samples_format(data, model, tokenizer, eval_method, threshold, file_path)
 
 def process_samples_format(data, model, tokenizer, eval_method, threshold, file_path):
-    """Process new format where each item has multiple samples"""
+    """Evaluate every sampled response of every question"""
     total_questions = len(data)
     total_samples = 0
     correct_samples = 0
@@ -207,8 +185,6 @@ def process_samples_format(data, model, tokenizer, eval_method, threshold, file_
             # Evaluate based on selected method
             if eval_method == 'llm':
                 is_match, score = evaluate_answer_llm(model, tokenizer, question, knowledge, right_answer, filtered_model_answer)
-            elif eval_method == 'bertscore':
-                is_match, score = evaluate_answer_bertscore(right_answer, filtered_model_answer, threshold)
             elif eval_method == 'rouge':
                 is_match, score = evaluate_answer_rouge(right_answer, filtered_model_answer, threshold)
             elif eval_method == 'em':
@@ -252,7 +228,7 @@ def process_samples_format(data, model, tokenizer, eval_method, threshold, file_
     print(f"\n" + "="*50)
     print(f"Results Summary:")
     print(f"  Evaluation method: {eval_method}")
-    if eval_method in ['bertscore', 'rouge']:
+    if eval_method == 'rouge':
         print(f"  Threshold: {threshold}")
     print(f"  Total questions: {total_questions}")
     print(f"  Total samples: {total_samples}")
@@ -262,8 +238,8 @@ def process_samples_format(data, model, tokenizer, eval_method, threshold, file_
     print(f"  Average score: {avg_score:.4f}")
     print("="*50)
 
-    # Save detailed results    
-    if eval_method in ['bertscore', 'rouge']:
+    # Save detailed results
+    if eval_method == 'rouge':
         output_file = file_path.replace('.jsonl', f'_evaluated_{eval_method}{threshold}.json')
         if '.jsonl' not in file_path:
             output_file = file_path.rsplit('.', 1)[0] + f'_evaluated_{eval_method}{threshold}.json'
@@ -276,7 +252,7 @@ def process_samples_format(data, model, tokenizer, eval_method, threshold, file_
         json.dump({
             'summary': {
                 'eval_method': eval_method,
-                'threshold': threshold if eval_method in ['bertscore', 'rouge'] else None,
+                'threshold': threshold if eval_method == 'rouge' else None,
                 'total_questions': total_questions,
                 'total_samples': total_samples,
                 'correct_samples': correct_samples,
@@ -292,41 +268,22 @@ def process_samples_format(data, model, tokenizer, eval_method, threshold, file_
     return accuracy, correct_samples, total_samples
 
 def main():
-    parser = argparse.ArgumentParser(description='Evaluate model answers using various methods')
-    # python3 02_answer_check.py --input_file halueval/qwen3-4b/base_model_temp0.7_samples5_fewshot3.jsonl --eval_method em
-    # python3 02_answer_check.py --input_file medqa/qwen3-4b/base_model_temp0.7_samples5_fewshot3.jsonl --eval_method em
-    # python3 02_answer_check.py --input_file sciq/qwen3-4b/base_model_temp0.7_samples5_fewshot3.jsonl --eval_method em
-
-    # python3 02_answer_check.py --input_file halueval/qwen3-4b/base_model_temp0.7_samples5_fewshot3.jsonl --eval_method bertscore --threshold 0.7
-    # python3 02_answer_check.py --input_file medqa/qwen3-4b/base_model_temp0.7_samples5_fewshot3.jsonl --eval_method bertscore --threshold 0.7
-    # python3 02_answer_check.py --input_file sciq/qwen3-4b/base_model_temp0.7_samples5_fewshot3.jsonl --eval_method bertscore --threshold 0.7
-
-    # python3 02_answer_check.py --input_file halueval/qwen3-4b/base_model_temp0.7_samples5_fewshot3.jsonl --eval_method rouge --threshold 0.35
-    # python3 02_answer_check.py --input_file medqa/qwen3-4b/base_model_temp0.7_samples5_fewshot3.jsonl --eval_method rouge --threshold 0.35
-    # python3 02_answer_check.py --input_file sciq/qwen3-4b/base_model_temp0.7_samples5_fewshot3.jsonl --eval_method rouge --threshold 0.35
-
-    # python3 02_answer_check.py --input_file halueval/qwen3-4b/base_model_greedy_samples_fewshot3.jsonl --eval_method em
-    # python3 02_answer_check.py --input_file medqa/qwen3-4b/base_model_greedy_samples_fewshot3.jsonl --eval_method em
-    # python3 02_answer_check.py --input_file sciq/qwen3-4b/base_model_greedy_samples_fewshot3.jsonl --eval_method em
+    parser = argparse.ArgumentParser(description='Judge sampled base-model responses (knowledge estimation)')
     parser.add_argument('--input_file', type=str, required=True,
-                       help='Path to JSONL file (e.g., halueval/base_model_results.jsonl)')
-    parser.add_argument('--eval_method', type=str, default='llm',
-                       choices=['llm', 'bertscore', 'rouge', 'em'],
-                       help='Evaluation method: llm (default), bertscore, rouge, or em (exact match)')
-    parser.add_argument('--model_path', type=str,
-                       default='../../model/gemma-3-12b-it',
-                       help='Path to Instruction model (only needed for llm method)')
+                        help='Output of run_inference.py, e.g. halueval/llama-3.2-3b/base_model_temp0.7_samples5_fewshot3.jsonl')
+    parser.add_argument('--eval_method', type=str, default='llm', choices=['llm', 'rouge', 'em'],
+                        help='Matching function: llm (LLM-as-a-judge), rouge (ROUGE-L >= threshold) or em (exact match)')
+    parser.add_argument('--model_path', type=str, default='google/gemma-3-12b-it',
+                        help='Judge model (only needed for the llm method)')
     parser.add_argument('--threshold', type=float, default=None,
-                       help='Threshold for bertscore/rouge (default: 0.7 for bertscore, 0.35 for rouge)')
+                        help='ROUGE-L threshold (paper: 0.35 for halueval, 0.6 for medqa/sciq)')
 
     args = parser.parse_args()
 
-    # Check if input file exists
     if not os.path.exists(args.input_file):
         print(f"Error: Input file '{args.input_file}' not found")
         return
 
-    # Load model only if using LLM method
     model = None
     tokenizer = None
     if args.eval_method == 'llm':
@@ -334,15 +291,7 @@ def main():
     else:
         print(f"Using {args.eval_method} method - no model loading required")
 
-    # Process the results file
-    accuracy, correct, total = process_results_file(
-        args.input_file,
-        model,
-        tokenizer,
-        eval_method=args.eval_method,
-        threshold=args.threshold
-    )
-
+    process_results_file(args.input_file, model, tokenizer, eval_method=args.eval_method, threshold=args.threshold)
     print(f"\nEvaluation complete!")
 
 if __name__ == "__main__":

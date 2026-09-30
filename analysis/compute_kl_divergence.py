@@ -1,19 +1,16 @@
 """
-KL Divergence Analysis between Base Model and SFT/Our Models
+Token-level KL divergence between the base model and fine-tuned models (paper Sec. 5.5, Table 12).
 
-Compares KL divergence based on whether Our model responded with <IDK> or not.
-Runs inference on-the-fly to determine <IDK> responses.
-
-Analysis:
-1. Base vs SFT: KL divergence for all samples
-2. Base vs Our: KL divergence split by <IDK> response
-   - Group A: Our model responded with <IDK>
-   - Group B: Our model responded without <IDK>
+KL(M_base || M_trained) is averaged over the gold response tokens of every test question.
+Reports Base-vs-SFT and Base-vs-Ours ("ours" is KWT by default, or SEAL with
+--save_run_name seal), also split by whether "ours" answers with <IDK>.
 
 Usage:
-    python 06_kl_divergence.py --dataname halueval --our_model_name sample_weighted_reverse_llm_idk0.2
+    python compute_kl_divergence.py --dataname halueval                           # SFT and KWT
+    python compute_kl_divergence.py --dataname halueval --save_run_name seal      # SFT and SEAL
 """
 
+import sys
 import json
 import torch
 import torch.nn.functional as F
@@ -23,9 +20,8 @@ import argparse
 from pathlib import Path
 import numpy as np
 
-def get_model_name(model_path):
-    """Extract model name from model path for directory naming"""
-    return Path(model_path).name.lower()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from paths import CKPT_DIR, RESULT_DIR, get_model_name, split_file, resolve_threshold, checkpoint_dir, result_stem
 
 def load_dataset(file_path):
     data = []
@@ -43,7 +39,7 @@ def has_idk_response(model_answer):
 
 
 def create_prompt(question):
-    """Create prompt for the model (same as 01_eval.py default method)"""
+    """Create prompt for the model (same as evaluate_results.py)"""
     prompt = f"Question: {question}\n\nAnswer:"
     return prompt
 
@@ -63,7 +59,6 @@ def generate_response(model, tokenizer, prompt, max_new_tokens=50):
         outputs = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            temperature=0.1,
             do_sample=False,
             pad_token_id=tokenizer.pad_token_id
         )
@@ -348,44 +343,29 @@ def save_results(results, stats, output_path):
 
 
 def main():
-    # python3 06_kl_divergence.py --dataname halueval --our_model_name sample_weight_reverse_smooth_llm_idk0.16 --max_samples 10
     parser = argparse.ArgumentParser(description='KL Divergence Analysis')
-    parser.add_argument('--dataname', type=str, required=True,
-                       choices=['halueval', 'medqa', 'sciq'],
-                       help='Dataset name')
-    parser.add_argument('--base_model', type=str,
-                       default='../../model/Llama-3.2-3B',
-                       help='Path to base model')
-    parser.add_argument('--our_model_name', type=str, required=True,
-                       help='Our model name (e.g., sample_weighted_reverse_llm_idk0.2)')
-    parser.add_argument('--max_samples', type=int, default=None,
-                       help='Maximum samples to process (for testing)')
-    parser.add_argument('--output_dir', type=str, default='kl_divergence',
-                       help='Output directory')
+    parser.add_argument('--dataname', type=str, required=True, choices=['halueval', 'medqa', 'sciq'])
+    parser.add_argument('--base_model', type=str, default='meta-llama/Llama-3.2-3B', help='Path or HF id of the base model')
+    parser.add_argument('--save_run_name', type=str, default='sample_weight_reverse_smooth',
+                        help='Training strategy of "ours" (e.g. sample_weight_reverse_smooth, seal)')
+    parser.add_argument('--data_eval_method', type=str, default='llm', choices=['llm', 'rouge', 'em'])
+    parser.add_argument('--threshold', type=str, default=None)
+    parser.add_argument('--sft_idk_weight', type=float, default=0.16)
+    parser.add_argument('--our_model_path', type=str, default=None, help='Explicit checkpoint path of "ours"')
+    parser.add_argument('--sft_model_path', type=str, default=None, help='Explicit checkpoint path of SFT')
+    parser.add_argument('--ckpt_root', type=str, default=str(CKPT_DIR))
+    parser.add_argument('--max_samples', type=int, default=None, help='Maximum samples to process (for testing)')
+    parser.add_argument('--output_dir', type=str, default=str(RESULT_DIR / 'kl_divergence'))
 
     args = parser.parse_args()
 
-    # Set paths based on dataname
-    if args.dataname == 'halueval':
-        args.data_path = '../dataset/halueval/halueval_test.jsonl'
-    elif args.dataname == 'medqa':
-        args.data_path = '../dataset/medqa/test.jsonl'
-    elif args.dataname == 'sciq':
-        args.data_path = '../dataset/sciq/test.jsonl'
-
-    # SFT and Our model paths
+    args.data_path = split_file(args.dataname, 'test')
     model_name = get_model_name(args.base_model)
-    sft_model_path = f'/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{model_name}/sft/sft'
-
-    # Parse our model name to construct path
-    # e.g., sample_weighted_reverse_llm_idk0.2 -> sample_weighted_reverse/sw_llm_idk0.2
-    # parts = args.our_model_name.rsplit('_', 2)  # Split from right    
-    # if len(parts) >= 3 and parts[-2] in ['llm', 'em', 'rouge0.35', 'rouge0.6']:
-    #     base_name = '_'.join(parts[:-2])  # e.g., sample_weighted_reverse
-    #     eval_method = parts[-2]  # e.g., llm
-    #     idk_weight = parts[-1]  # e.g., idk0.2
-    #     our_model_path = f'/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/{model_name}/{base_name}/sw_{eval_method}_{idk_weight}'
-    our_model_path = f'/mnt/frdata/rungjoo/hall/halu_model/{args.dataname}/seal/seal'
+    threshold = resolve_threshold(args.dataname, args.data_eval_method, args.threshold)
+    sft_model_path = args.sft_model_path or str(checkpoint_dir(args.ckpt_root, args.dataname, model_name, 'sft'))
+    our_model_path = args.our_model_path or str(checkpoint_dir(args.ckpt_root, args.dataname, model_name, args.save_run_name,
+                                                               args.data_eval_method, threshold, args.sft_idk_weight))
+    args.our_model_name = result_stem(args.save_run_name, args.data_eval_method, threshold, args.sft_idk_weight)
 
     print(f"Base model: {args.base_model}")
     print(f"SFT model: {sft_model_path}")

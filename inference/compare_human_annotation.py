@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Compare human annotation with ROUGE threshold and LLM evaluation.
-Find the optimal ROUGE threshold that maximizes agreement with human annotation.
+Compare human annotation with EM, ROUGE and LLM-as-a-judge (paper Table 2), and
+find the ROUGE-L threshold that maximizes agreement with human annotation.
 """
 
 import json
 import re
 from typing import Dict, List, Tuple
 from collections import defaultdict
+from pathlib import Path
 
 
 def load_human_annotation(file_path: str) -> List[Dict]:
@@ -18,11 +19,11 @@ def load_human_annotation(file_path: str) -> List[Dict]:
 
 
 def normalize_text(text: str) -> str:
-    """간단한 문자열 정규화: 소문자 변환, 앞뒤 공백 제거, 다중 공백 축소"""
+    """Simple text normalization: lowercase, strip whitespace, collapse multiple spaces"""
     if not text:
         return ""
     text = text.lower().strip()
-    text = re.sub(r"\s+", " ", text)  # 여러 공백을 하나로
+    text = re.sub(r"\s+", " ", text)
     return text
 
 
@@ -315,16 +316,14 @@ def find_optimal_rouge_threshold(results: List[Dict],
 
 def main():
     import argparse
-    # python3 05_compare_human_annotation.py --input_file halueval/human_annotation_100samples_diverse.json --output_file halueval/human_annotation_comparison_results.json
-    # python3 05_compare_human_annotation.py --input_file medqa/human_annotation_100samples_diverse.json --output_file medqa/human_annotation_comparison_results.json
-    # python3 05_compare_human_annotation.py --input_file sciq/human_annotation_100samples_diverse.json --output_file sciq/human_annotation_comparison_results.json
+    # python3 compare_human_annotation.py --input_file ../dataset/human_annotation/halueval.json --output_file halueval/llama-3.2-3b/human_annotation_comparison_results.json
     parser = argparse.ArgumentParser(description='Compare human annotation with ROUGE and LLM')
     parser.add_argument('--input_file', type=str,
-                        default='halueval/human_annotation_100samples_diverse.json',
-                        help='Path to human annotation file')
+                        required=True,
+                        help='Human annotation file (e.g. ../dataset/human_annotation/halueval.json)')
     parser.add_argument('--output_file', type=str,
-                        default='halueval/human_annotation_comparison_results.json',
-                        help='Path to output comparison results')
+                        default=None,
+                        help='Path to save comparison results (optional)')
 
     args = parser.parse_args()
 
@@ -650,11 +649,11 @@ def main():
         }
     }
 
-    # Save updated output data
-    with open(args.output_file, 'w') as f:
-        json.dump(output_data, f, indent=2)
-
-    print(f"\n✓ Results (including question-level analysis) saved to: {args.output_file}")
+    if args.output_file:
+        Path(args.output_file).parent.mkdir(parents=True, exist_ok=True)
+        with open(args.output_file, 'w') as f:
+            json.dump(output_data, f, indent=2)
+        print(f"\n✓ Results (including question-level analysis) saved to: {args.output_file}")
 
 
 if __name__ == '__main__':

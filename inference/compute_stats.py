@@ -102,20 +102,17 @@ def analyze_sample_statistics(evaluated_file):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Analyze statistics from answer check results',
+        description='Knowledge-score distribution of a judged file (paper Table 3)',
         epilog='''
 Examples:
-python3 03_stats.py --input_file halueval/qwen2.5-3b/base_model_temp0.7_samples5_fewshot3_evaluated_rouge0.35.json
-  python3 03_stats.py --input_file sciq/qwen3-4b/base_model_temp0.7_samples5_fewshot3_evaluated_em.json
-  python3 03_stats.py --input_file halueval/qwen2.5-3b/base_model_temp0.7_samples5_fewshot3_evaluated_llm.json
-  python3 03_stats.py --input_file medqa/qwen3-4b/base_model_temp0.7_samples5_fewshot3_evaluated_bertscore.json
-  python3 03_stats.py --input_file sciq/qwen3-4b/base_model_temp0.7_samples5_fewshot3_evaluated_bertscore.json
+  python3 compute_stats.py --input_file halueval/llama-3.2-3b/base_model_temp0.7_samples5_fewshot3_evaluated_llm.json
+  python3 compute_stats.py --input_file medqa/llama-3.2-3b/base_model_temp0.7_samples5_fewshot3_evaluated_rouge0.6.json
         ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument('--input_file', type=str, required=True,
-                       help='Path to evaluated JSON file (output from 02_answer_check.py)')
+                       help='Path to evaluated JSON file (output of check_answers.py)')
 
     args = parser.parse_args()
 
